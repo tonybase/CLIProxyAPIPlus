@@ -1,4 +1,4 @@
-package executor
+package helps
 
 import (
 	"context"
@@ -24,6 +24,21 @@ func TestNormalizeOpenAIResponsesItemIDs(t *testing.T) {
 			name: "rewrites ctc id on function_call",
 			body: `{"input":[{"type":"function_call","id":"ctc_call_abc","call_id":"call_abc","name":"shell","arguments":"{}"}]}`,
 			want: `{"input":[{"type":"function_call","id":"fc_call_abc","call_id":"call_abc","name":"shell","arguments":"{}"}]}`,
+		},
+		{
+			name: "rewrites ctco id on function_call_output",
+			body: `{"input":[{"type":"function_call_output","id":"ctco_1234","call_id":"call_abc","output":"ok"}]}`,
+			want: `{"input":[{"type":"function_call_output","id":"fco_1234","call_id":"call_abc","output":"ok"}]}`,
+		},
+		{
+			name: "rewrites fco id on custom_tool_call_output",
+			body: `{"input":[{"type":"custom_tool_call_output","id":"fco_1234","call_id":"call_abc","output":"ok"}]}`,
+			want: `{"input":[{"type":"custom_tool_call_output","id":"ctco_1234","call_id":"call_abc","output":"ok"}]}`,
+		},
+		{
+			name: "keeps matching custom_tool_call_output id",
+			body: `{"input":[{"type":"custom_tool_call_output","id":"ctco_1234","call_id":"call_abc","output":"ok"}]}`,
+			want: `{"input":[{"type":"custom_tool_call_output","id":"ctco_1234","call_id":"call_abc","output":"ok"}]}`,
 		},
 		{
 			name: "prefixes unknown id shape",
@@ -69,9 +84,9 @@ func TestNormalizeOpenAIResponsesItemIDs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeOpenAIResponsesItemIDs(ctx, "test", []byte(tt.body))
+			got := NormalizeOpenAIResponsesItemIDs(ctx, "test", []byte(tt.body))
 			if string(got) != tt.want {
-				t.Fatalf("normalizeOpenAIResponsesItemIDs() = %s, want %s", got, tt.want)
+				t.Fatalf("NormalizeOpenAIResponsesItemIDs() = %s, want %s", got, tt.want)
 			}
 		})
 	}
@@ -79,7 +94,7 @@ func TestNormalizeOpenAIResponsesItemIDs(t *testing.T) {
 
 func TestNormalizeOpenAIResponsesItemIDsNoChangeReturnsSameBody(t *testing.T) {
 	body := []byte(`{"input":[{"type":"function_call","id":"fc_call_1","call_id":"call_1","name":"a","arguments":"{}"}]}`)
-	got := normalizeOpenAIResponsesItemIDs(context.Background(), "test", body)
+	got := NormalizeOpenAIResponsesItemIDs(context.Background(), "test", body)
 	if string(got) != string(body) {
 		t.Fatalf("expected unchanged body, got %s", got)
 	}

@@ -19,6 +19,7 @@ import (
 	. "github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	responsesconverter "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/responses"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
 	"github.com/tidwall/gjson"
@@ -388,6 +389,11 @@ func (h *OpenAIResponsesAPIHandler) Responses(c *gin.Context) {
 	stream := streamResult.Type == gjson.True
 
 	modelName := gjson.GetBytes(rawJSON, "model").String()
+	// Replayed history from another channel may pair an item type with an
+	// incompatible id prefix (e.g. custom_tool_call carrying an fc_ id), which
+	// strict Responses upstreams reject. Normalize before dispatch so every
+	// downstream channel and retry receives a conforming payload.
+	rawJSON = helps.NormalizeOpenAIResponsesItemIDs(c.Request.Context(), "openai responses handler", rawJSON)
 	if overrideEndpoint, ok := resolveEndpointOverride(modelName, openAIResponsesEndpoint); ok && overrideEndpoint == openAIChatEndpoint {
 		chatJSON := responsesconverter.ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName, rawJSON, stream)
 		stream = gjson.GetBytes(chatJSON, "stream").Bool()
@@ -434,6 +440,7 @@ func (h *OpenAIResponsesAPIHandler) Compact(c *gin.Context) {
 			rawJSON = updated
 		}
 	}
+	rawJSON = helps.NormalizeOpenAIResponsesItemIDs(c.Request.Context(), "openai responses compact handler", rawJSON)
 
 	c.Header("Content-Type", "application/json")
 	modelName := gjson.GetBytes(rawJSON, "model").String()
