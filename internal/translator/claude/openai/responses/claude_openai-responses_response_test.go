@@ -743,14 +743,23 @@ func TestConvertClaudeResponseToOpenAIResponses_EmitsCustomToolCall(t *testing.T
 	if !added.Exists() {
 		t.Fatal("expected custom_tool_call output_item.added event")
 	}
+	if got := added.Get("item.id").String(); got != "ctc_call_patch" {
+		t.Fatalf("added item.id = %q, want ctc_call_patch", got)
+	}
 	if got := added.Get("item.call_id").String(); got != "call_patch" {
 		t.Fatalf("added item.call_id = %q, want call_patch", got)
 	}
 	if got := added.Get("item.name").String(); got != "apply_patch" {
 		t.Fatalf("added item.name = %q, want apply_patch", got)
 	}
+	if got := inputDone.Get("item_id").String(); got != "ctc_call_patch" {
+		t.Fatalf("custom_tool_call_input.done item_id = %q, want ctc_call_patch", got)
+	}
 	if got := inputDone.Get("input").String(); got != wantInput {
 		t.Fatalf("custom_tool_call_input.done input = %q, want %q", got, wantInput)
+	}
+	if got := itemDone.Get("item.id").String(); got != "ctc_call_patch" {
+		t.Fatalf("done item.id = %q, want ctc_call_patch", got)
 	}
 	if got := itemDone.Get("item.input").String(); got != wantInput {
 		t.Fatalf("done item.input = %q, want %q", got, wantInput)
@@ -760,6 +769,9 @@ func TestConvertClaudeResponseToOpenAIResponses_EmitsCustomToolCall(t *testing.T
 	}
 	if got := completed.Get("response.output.0.type").String(); got != "custom_tool_call" {
 		t.Fatalf("completed output type = %q, want custom_tool_call", got)
+	}
+	if got := completed.Get("response.output.0.id").String(); got != "ctc_call_patch" {
+		t.Fatalf("completed output id = %q, want ctc_call_patch", got)
 	}
 	if got := completed.Get("response.output.0.input").String(); got != wantInput {
 		t.Fatalf("completed output input = %q, want %q", got, wantInput)
@@ -784,6 +796,9 @@ func TestConvertClaudeResponseToOpenAIResponsesNonStream_EmitsCustomToolCall(t *
 
 	if got := root.Get("output.0.type").String(); got != "custom_tool_call" {
 		t.Fatalf("non-stream output type = %q, want custom_tool_call", got)
+	}
+	if got := root.Get("output.0.id").String(); got != "ctc_call_patch" {
+		t.Fatalf("non-stream output id = %q, want ctc_call_patch", got)
 	}
 	if got := root.Get("output.0.call_id").String(); got != "call_patch" {
 		t.Fatalf("non-stream output call_id = %q, want call_patch", got)

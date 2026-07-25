@@ -26,6 +26,14 @@ func TestNormalizeOpenAIResponsesItemIDs(t *testing.T) {
 			want: `{"input":[{"type":"function_call","id":"fc_call_abc","call_id":"call_abc","name":"shell","arguments":"{}"}]}`,
 		},
 		{
+			// Mirrors a production payload shape: the mismatched custom_tool_call
+			// carries a status field and is followed by its output item, which
+			// references the call by call_id. Only the id prefix may change.
+			name: "rewrites production-shaped custom_tool_call and preserves call_id linkage",
+			body: `{"input":[{"type":"custom_tool_call","id":"fc_call_e74df243-c673-4da8-aac8-be9d294a180c","status":"completed","call_id":"call_e74df243-c673-4da8-aac8-be9d294a180c","name":"exec","input":"const r = await tools.exec_command({cmd:\"ls\"});"},{"type":"reasoning","id":"rs_58964044-9932-41c6-af85-df57a3658bc5_1"},{"type":"custom_tool_call_output","id":"ctco_019f93f6-3690-7913-afc0-64c6d718d361","call_id":"call_e74df243-c673-4da8-aac8-be9d294a180c","output":"ok"}]}`,
+			want: `{"input":[{"type":"custom_tool_call","id":"ctc_call_e74df243-c673-4da8-aac8-be9d294a180c","status":"completed","call_id":"call_e74df243-c673-4da8-aac8-be9d294a180c","name":"exec","input":"const r = await tools.exec_command({cmd:\"ls\"});"},{"type":"reasoning","id":"rs_58964044-9932-41c6-af85-df57a3658bc5_1"},{"type":"custom_tool_call_output","id":"ctco_019f93f6-3690-7913-afc0-64c6d718d361","call_id":"call_e74df243-c673-4da8-aac8-be9d294a180c","output":"ok"}]}`,
+		},
+		{
 			name: "rewrites ctco id on function_call_output",
 			body: `{"input":[{"type":"function_call_output","id":"ctco_1234","call_id":"call_abc","output":"ok"}]}`,
 			want: `{"input":[{"type":"function_call_output","id":"fco_1234","call_id":"call_abc","output":"ok"}]}`,
