@@ -28,7 +28,6 @@ import (
 	kirocommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/common"
 	kiroopenai "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/openai"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
-	sdkauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
@@ -4022,10 +4021,10 @@ func (e *KiroExecutor) persistRefreshedAuth(auth *cliproxyauth.Auth) error {
 		return fmt.Errorf("kiro executor: marshal metadata failed: %w", err)
 	}
 
-	// Write with read-back verification: a peer instance on a shared auth
-	// directory can interleave a concurrent write and corrupt the result, so
-	// the persisted JSON is validated and the write retried before giving up.
-	if err := sdkauth.WriteJSONFileVerified(authPath, raw, 0o600); err != nil {
+	// Publish atomically: a peer instance on a shared auth directory refreshes the
+	// same credential independently, and a plain write would let the two interleave
+	// a truncate with a write and leave a torn file behind.
+	if err := util.WriteJSONFileAtomic(authPath, raw, 0o600); err != nil {
 		return fmt.Errorf("kiro executor: persist auth file failed: %w", err)
 	}
 

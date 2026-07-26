@@ -15,8 +15,10 @@ import (
 	"time"
 
 	qoderauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/qoder"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	log "github.com/sirupsen/logrus"
 )
 
 // PluginAuthParser parses auth JSON owned by plugin providers.
@@ -126,7 +128,7 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 		if existing, errRead := os.ReadFile(path); errRead == nil && jsonEqual(existing, raw) {
 			return path, nil
 		}
-		if errWrite := WriteJSONFileVerified(path, raw, 0o600); errWrite != nil {
+		if errWrite := util.WriteJSONFileAtomic(path, raw, 0o600); errWrite != nil {
 			return "", fmt.Errorf("auth filestore: write file failed: %w", errWrite)
 		}
 	default:
@@ -145,29 +147,6 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 	}
 
 	return path, nil
-}
-
-// WriteJSONFileVerified writes data to path and reads it back to confirm the
-// persisted content is valid JSON. A concurrent writer on a shared auth
-// directory (e.g. NFS) can interleave with a plain write and leave torn
-// content; the read-back detects that and the write is retried before giving
-// up. Content equal to a peer's newer write still passes validation, which is
-// fine: the newer token wins and other instances converge via directory
-// polling.
-func WriteJSONFileVerified(path string, data []byte, perm os.FileMode) error {
-	for attempt := 0; attempt < 3; attempt++ {
-		if errWrite := os.WriteFile(path, data, perm); errWrite != nil {
-			return fmt.Errorf("write file failed: %w", errWrite)
-		}
-		persisted, errRead := os.ReadFile(path)
-		if errRead != nil {
-			return fmt.Errorf("read back file failed: %w", errRead)
-		}
-		if json.Valid(persisted) {
-			return nil
-		}
-	}
-	return fmt.Errorf("persisted content failed JSON validation")
 }
 
 // List enumerates all auth JSON files under the configured directory.
@@ -306,9 +285,8 @@ func (s *FileTokenStore) readAuthFiles(path, baseDir string) ([]*cliproxyauth.Au
 				if errFetch == nil && strings.TrimSpace(fetchedProjectID) != "" {
 					metadata["project_id"] = strings.TrimSpace(fetchedProjectID)
 					if raw, errMarshal := json.Marshal(metadata); errMarshal == nil {
-						if file, errOpen := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600); errOpen == nil {
-							_, _ = file.Write(raw)
-							_ = file.Close()
+						if errWrite := util.WriteJSONFileAtomic(path, raw, 0o600); errWrite != nil {
+							log.Debugf("auth filestore: backfill project_id for %s failed: %v", path, errWrite)
 						}
 					}
 				}
