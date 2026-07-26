@@ -436,7 +436,9 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 				item := []byte(`{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"id":"","type":"custom_tool_call","status":"in_progress","call_id":"","name":"","input":""}}`)
 				item, _ = sjson.SetBytes(item, "sequence_number", nextSeq())
 				item, _ = sjson.SetBytes(item, "output_index", outputIndex)
-				item, _ = sjson.SetBytes(item, "item.id", fmt.Sprintf("fc_%s", st.CurrentFCID))
+				// custom_tool_call items must carry a ctc_-prefixed id; strict
+				// Responses upstreams reject an fc_ id when the item is replayed.
+				item, _ = sjson.SetBytes(item, "item.id", fmt.Sprintf("ctc_%s", st.CurrentFCID))
 				item, _ = sjson.SetBytes(item, "item.call_id", st.CurrentFCID)
 				item, _ = sjson.SetBytes(item, "item.name", name)
 				out = append(out, emitEvent("response.output_item.added", item))
@@ -567,21 +569,21 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 				if input != "" {
 					deltaMsg := []byte(`{"type":"response.custom_tool_call_input.delta","sequence_number":0,"item_id":"","output_index":0,"delta":""}`)
 					deltaMsg, _ = sjson.SetBytes(deltaMsg, "sequence_number", nextSeq())
-					deltaMsg, _ = sjson.SetBytes(deltaMsg, "item_id", fmt.Sprintf("fc_%s", st.CurrentFCID))
+					deltaMsg, _ = sjson.SetBytes(deltaMsg, "item_id", fmt.Sprintf("ctc_%s", st.CurrentFCID))
 					deltaMsg, _ = sjson.SetBytes(deltaMsg, "output_index", outputIndex)
 					deltaMsg, _ = sjson.SetBytes(deltaMsg, "delta", input)
 					out = append(out, emitEvent("response.custom_tool_call_input.delta", deltaMsg))
 				}
 				inputDone := []byte(`{"type":"response.custom_tool_call_input.done","sequence_number":0,"item_id":"","output_index":0,"input":""}`)
 				inputDone, _ = sjson.SetBytes(inputDone, "sequence_number", nextSeq())
-				inputDone, _ = sjson.SetBytes(inputDone, "item_id", fmt.Sprintf("fc_%s", st.CurrentFCID))
+				inputDone, _ = sjson.SetBytes(inputDone, "item_id", fmt.Sprintf("ctc_%s", st.CurrentFCID))
 				inputDone, _ = sjson.SetBytes(inputDone, "output_index", outputIndex)
 				inputDone, _ = sjson.SetBytes(inputDone, "input", input)
 				out = append(out, emitEvent("response.custom_tool_call_input.done", inputDone))
 				itemDone := []byte(`{"type":"response.output_item.done","sequence_number":0,"output_index":0,"item":{"id":"","type":"custom_tool_call","status":"completed","call_id":"","name":"","input":""}}`)
 				itemDone, _ = sjson.SetBytes(itemDone, "sequence_number", nextSeq())
 				itemDone, _ = sjson.SetBytes(itemDone, "output_index", outputIndex)
-				itemDone, _ = sjson.SetBytes(itemDone, "item.id", fmt.Sprintf("fc_%s", st.CurrentFCID))
+				itemDone, _ = sjson.SetBytes(itemDone, "item.id", fmt.Sprintf("ctc_%s", st.CurrentFCID))
 				itemDone, _ = sjson.SetBytes(itemDone, "item.call_id", st.CurrentFCID)
 				itemDone, _ = sjson.SetBytes(itemDone, "item.name", st.FuncNames[idx])
 				itemDone, _ = sjson.SetBytes(itemDone, "item.input", input)
@@ -699,7 +701,7 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 				}
 				if st.FuncIsCustom[idx] {
 					item := []byte(`{"id":"","type":"custom_tool_call","status":"completed","call_id":"","name":"","input":""}`)
-					item, _ = sjson.SetBytes(item, "id", fmt.Sprintf("fc_%s", callID))
+					item, _ = sjson.SetBytes(item, "id", fmt.Sprintf("ctc_%s", callID))
 					item, _ = sjson.SetBytes(item, "call_id", callID)
 					item, _ = sjson.SetBytes(item, "name", name)
 					item, _ = sjson.SetBytes(item, "input", unwrapResponsesCustomToolInput(args))
@@ -933,7 +935,7 @@ func ConvertClaudeResponseToOpenAIResponsesNonStream(_ context.Context, _ string
 			}
 			if customToolNames[st.name] {
 				item := []byte(`{"id":"","type":"custom_tool_call","status":"completed","call_id":"","name":"","input":""}`)
-				item, _ = sjson.SetBytes(item, "id", fmt.Sprintf("fc_%s", st.id))
+				item, _ = sjson.SetBytes(item, "id", fmt.Sprintf("ctc_%s", st.id))
 				item, _ = sjson.SetBytes(item, "call_id", st.id)
 				item, _ = sjson.SetBytes(item, "name", st.name)
 				item, _ = sjson.SetBytes(item, "input", unwrapResponsesCustomToolInput(args))

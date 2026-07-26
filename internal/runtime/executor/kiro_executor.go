@@ -266,9 +266,11 @@ func getKiroPooledHTTPClient() *http.Client {
 	kiroHTTPClientPoolOnce.Do(func() {
 		transport := &http.Transport{
 			// Connection pool settings
-			MaxIdleConns:        100,              // Max idle connections across all hosts
-			MaxIdleConnsPerHost: 20,               // Max idle connections per host
-			MaxConnsPerHost:     50,               // Max total connections per host
+			// Kiro upstream is essentially a single host, so per-host limits
+			// are sized generously to maximize connection reuse under concurrency.
+			MaxIdleConns:        256,              // Max idle connections across all hosts
+			MaxIdleConnsPerHost: 128,              // Max idle connections per host
+			MaxConnsPerHost:     1024,             // Max total connections per host
 			IdleConnTimeout:     90 * time.Second, // How long idle connections stay in pool
 
 			// Timeouts for connection establishment
@@ -288,6 +290,15 @@ func getKiroPooledHTTPClient() *http.Client {
 
 			// Enable HTTP/2 when available
 			ForceAttemptHTTP2: true,
+
+			// HTTP/2 keep-alive probes. Long-lived multiplexed connections can be
+			// dropped by NAT or load balancers without the client noticing, which
+			// would otherwise stall requests written to a dead connection. This is
+			// connection health checking, not a timeout on request processing.
+			HTTP2: &http.HTTP2Config{
+				SendPingTimeout: 30 * time.Second, // Send a PING after this much idle time
+				PingTimeout:     30 * time.Second, // Discard the connection if no PING ack
+			},
 		}
 
 		kiroHTTPClientPool = &http.Client{
@@ -913,7 +924,14 @@ func (e *KiroExecutor) executeWithRetry(ctx context.Context, auth *cliproxyauth.
 				_ = httpResp.Body.Close()
 				appendAPIResponseChunk(ctx, e.cfg, respBody)
 
-				log.Warnf("kiro: received 402 (monthly limit). Upstream body: %s", string(respBody))
+				// Monthly request quota is account-scoped rather than model-scoped, so cool down
+				// the whole account when the upstream confirms it via MONTHLY_REQUEST_COUNT.
+				// Other 402 reasons fall back to the per-model cooldown handled by the conductor.
+				if strings.Contains(string(respBody), "MONTHLY_REQUEST_COUNT") {
+					cooldownMgr.SetCooldown(tokenKey, kiroauth.LongCooldown, kiroauth.CooldownReasonQuotaExhausted)
+				}
+				log.Warnf("kiro: received 402 (monthly limit). account=%s label=%s token=%s. Upstream body: %s",
+					auth.ID, auth.Label, tokenKey, string(respBody))
 
 				// Return upstream error body directly
 				return resp, statusErr{code: httpResp.StatusCode, msg: string(respBody)}
@@ -1359,7 +1377,14 @@ func (e *KiroExecutor) executeStreamWithRetry(ctx context.Context, auth *cliprox
 				_ = httpResp.Body.Close()
 				appendAPIResponseChunk(ctx, e.cfg, respBody)
 
-				log.Warnf("kiro: stream received 402 (monthly limit). account=%s label=%s model=%s. Upstream body: %s", auth.ID, auth.Label, kiroModelID, string(respBody))
+				// Monthly request quota is account-scoped rather than model-scoped, so cool down
+				// the whole account when the upstream confirms it via MONTHLY_REQUEST_COUNT.
+				// Other 402 reasons fall back to the per-model cooldown handled by the conductor.
+				if strings.Contains(string(respBody), "MONTHLY_REQUEST_COUNT") {
+					cooldownMgr.SetCooldown(tokenKey, kiroauth.LongCooldown, kiroauth.CooldownReasonQuotaExhausted)
+				}
+				log.Warnf("kiro: stream received 402 (monthly limit). account=%s label=%s model=%s token=%s. Upstream body: %s",
+					auth.ID, auth.Label, kiroModelID, tokenKey, string(respBody))
 
 				// Return upstream error body directly
 				return nil, statusErr{code: httpResp.StatusCode, msg: string(respBody)}

@@ -467,7 +467,7 @@ func (e *websocketCompactionCaptureExecutor) ExecuteStream(_ context.Context, _ 
 	var payload []byte
 	switch callIndex {
 	case 0:
-		payload = []byte(`{"type":"response.completed","response":{"id":"resp-1","output":[{"type":"function_call","id":"fc-1","call_id":"call-1","name":"tool"}]}}`)
+		payload = []byte(`{"type":"response.completed","response":{"id":"resp-1","output":[{"type":"function_call","id":"fc_1","call_id":"call-1","name":"tool"}]}}`)
 	case 1:
 		payload = []byte(`{"type":"response.completed","response":{"id":"resp-2","output":[{"type":"message","id":"assistant-1"}]}}`)
 	default:
@@ -2491,7 +2491,7 @@ func TestResponsesWebsocketDoesNotInjectPreviousResponseIDWhenPendingToolOutputM
 	if len(input) != 3 {
 		t.Fatalf("second upstream input len = %d, want 3: %s", len(input), secondPayload)
 	}
-	if input[0].Get("id").String() != "msg-1" || input[1].Get("id").String() != "fc-1" || input[2].Get("id").String() != "summary-1" {
+	if input[0].Get("id").String() != "msg-1" || input[1].Get("id").String() != "fc_1" || input[2].Get("id").String() != "summary-1" {
 		t.Fatalf("unexpected merged upstream input when pending tool output is missing: %s", secondPayload)
 	}
 }
@@ -3233,7 +3233,7 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnCustomToolTranscriptReplac
 		t.Fatalf("compact status = %d, want %d", compactResp.StatusCode, http.StatusOK)
 	}
 
-	postCompact := `{"type":"response.create","input":[{"type":"custom_tool_call","id":"ctc-compact","call_id":"call-1","name":"apply_patch"},{"type":"custom_tool_call_output","id":"tool-out-compact","call_id":"call-1"},{"type":"message","id":"msg-2"}]}`
+	postCompact := `{"type":"response.create","input":[{"type":"custom_tool_call","id":"ctc_compact","call_id":"call-1","name":"apply_patch"},{"type":"custom_tool_call_output","id":"ctco_out-compact","call_id":"call-1"},{"type":"message","id":"msg-2"}]}`
 	if errWrite := conn.WriteMessage(websocket.TextMessage, []byte(postCompact)); errWrite != nil {
 		t.Fatalf("write post-compact websocket message: %v", errWrite)
 	}
@@ -3260,8 +3260,8 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnCustomToolTranscriptReplac
 	if len(items) != 3 {
 		t.Fatalf("merged input len = %d, want 3: %s", len(items), merged)
 	}
-	if items[0].Get("id").String() != "ctc-compact" ||
-		items[1].Get("id").String() != "tool-out-compact" ||
+	if items[0].Get("id").String() != "ctc_compact" ||
+		items[1].Get("id").String() != "ctco_out-compact" ||
 		items[2].Get("id").String() != "msg-2" {
 		t.Fatalf("unexpected post-compact input order: %s", merged)
 	}
@@ -3339,7 +3339,7 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnTranscriptReplacement(t *t
 
 	// Simulate a post-compaction client turn that replaces local history with a compacted transcript.
 	// The websocket handler must treat this as a state reset, not append it to stale pre-compaction state.
-	postCompact := `{"type":"response.create","input":[{"type":"function_call","id":"fc-compact","call_id":"call-1","name":"tool"},{"type":"message","id":"msg-2"}]}`
+	postCompact := `{"type":"response.create","input":[{"type":"function_call","id":"fc_compact","call_id":"call-1","name":"tool"},{"type":"message","id":"msg-2"}]}`
 	if errWrite := conn.WriteMessage(websocket.TextMessage, []byte(postCompact)); errWrite != nil {
 		t.Fatalf("write post-compact websocket message: %v", errWrite)
 	}
@@ -3366,7 +3366,7 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnTranscriptReplacement(t *t
 	if len(items) != 2 {
 		t.Fatalf("merged input len = %d, want 2: %s", len(items), merged)
 	}
-	if items[0].Get("id").String() != "fc-compact" ||
+	if items[0].Get("id").String() != "fc_compact" ||
 		items[1].Get("id").String() != "msg-2" {
 		t.Fatalf("unexpected post-compact input order: %s", merged)
 	}
