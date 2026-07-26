@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -106,6 +107,7 @@ func WriteJSONFileAtomic(path string, data []byte, perm os.FileMode) error {
 			return nil
 		}
 		log.Warnf("atomic write: %s holds invalid JSON after write, retrying", path)
+		time.Sleep(time.Second)
 	}
 	return fmt.Errorf("persisted content failed JSON validation: %s", path)
 }
