@@ -266,9 +266,11 @@ func getKiroPooledHTTPClient() *http.Client {
 	kiroHTTPClientPoolOnce.Do(func() {
 		transport := &http.Transport{
 			// Connection pool settings
-			MaxIdleConns:        100,              // Max idle connections across all hosts
-			MaxIdleConnsPerHost: 20,               // Max idle connections per host
-			MaxConnsPerHost:     50,               // Max total connections per host
+			// Kiro upstream is essentially a single host, so per-host limits
+			// are sized generously to maximize connection reuse under concurrency.
+			MaxIdleConns:        256,              // Max idle connections across all hosts
+			MaxIdleConnsPerHost: 128,              // Max idle connections per host
+			MaxConnsPerHost:     1024,             // Max total connections per host
 			IdleConnTimeout:     90 * time.Second, // How long idle connections stay in pool
 
 			// Timeouts for connection establishment
