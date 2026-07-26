@@ -54,7 +54,13 @@ func (w *Watcher) start(ctx context.Context) error {
 // changes made by other processes/hosts. fsnotify does not deliver events for
 // remote changes (e.g. NFS-shared auth directories), so polling is the
 // fallback that keeps multi-instance deployments converging.
-const authPollInterval = 30 * time.Second
+//
+// A tick costs one directory read plus one file read per auth file, so this
+// bounds how fast a token refreshed on one host reaches the others. On NFS the
+// mount's attribute cache is the real floor: polling faster than acregmin only
+// re-reads cached attributes, so shared deployments want a low actimeo for this
+// interval to take effect.
+const authPollInterval = 5 * time.Second
 
 // startAuthPoll launches a ticker that periodically reconciles the auth
 // directory using the same incremental per-file paths as fsnotify events.
