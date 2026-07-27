@@ -695,6 +695,13 @@ func convertResponsesToolToClaudeTools(tool gjson.Result, toolNameMap map[string
 	return nil
 }
 
+// freeformToolInputDescription documents the {"input": string} envelope that
+// wraps a Responses freeform custom tool for Claude. It doubles as a marker:
+// the response converter matches on it to recover the custom-tool
+// classification when only the translated Claude request is available and the
+// original type:"custom" declaration is therefore out of reach.
+const freeformToolInputDescription = "Freeform tool input payload."
+
 // convertResponsesCustomToolToClaude maps an OpenAI Responses freeform custom
 // tool (e.g. codex's apply_patch) to a Claude tool. Claude tool inputs must be
 // JSON objects, so the freeform payload is wrapped in an {"input": "..."}
@@ -715,9 +722,10 @@ func convertResponsesCustomToolToClaude(tool gjson.Result) ([]byte, bool) {
 		description += "The `input` string MUST follow this grammar:\n" + definition
 	}
 
-	tJSON := []byte(`{"name":"","description":"","input_schema":{"type":"object","properties":{"input":{"type":"string","description":"Freeform tool input payload."}},"required":["input"],"additionalProperties":false}}`)
+	tJSON := []byte(`{"name":"","description":"","input_schema":{"type":"object","properties":{"input":{"type":"string","description":""}},"required":["input"],"additionalProperties":false}}`)
 	tJSON, _ = sjson.SetBytes(tJSON, "name", name)
 	tJSON, _ = sjson.SetBytes(tJSON, "description", description)
+	tJSON, _ = sjson.SetBytes(tJSON, "input_schema.properties.input.description", freeformToolInputDescription)
 	tJSON = common.AttachCacheControl(tJSON, tool)
 	return tJSON, true
 }

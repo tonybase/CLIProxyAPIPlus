@@ -45,6 +45,11 @@ type claudeToResponsesState struct {
 	ReasoningIndex     int
 	// custom tool names declared in the request (freeform input tools)
 	CustomToolNames map[string]bool
+	// CustomToolNamesReady records whether CustomToolNames has been resolved.
+	// responsesCustomToolNames returns nil when the request declares no custom
+	// tools, so a nil map alone cannot distinguish "no custom tools" from
+	// "not resolved yet".
+	CustomToolNamesReady bool
 	// usage aggregation
 	Usage claudeResponsesUsageTokens
 }
@@ -117,7 +122,7 @@ func normalizeResponsesID(rawID string) (responseID, baseID string) {
 func responsesCustomToolNames(requestRawJSON []byte) map[string]bool {
 	var names map[string]bool
 	forEachResponsesTool(requestRawJSON, func(tool gjson.Result) bool {
-		if strings.TrimSpace(tool.Get("type").String()) != "custom" {
+		if !isResponsesCustomToolDeclaration(tool) {
 			return true
 		}
 		if name := strings.TrimSpace(tool.Get("name").String()); name != "" {
@@ -129,6 +134,36 @@ func responsesCustomToolNames(requestRawJSON []byte) map[string]bool {
 		return true
 	})
 	return names
+}
+
+// isResponsesCustomToolDeclaration reports whether a tool declaration describes
+// a freeform custom tool. Responses requests mark these with type:"custom", but
+// that marker is lost once the request is translated to Claude, and the
+// converter only sees the translated form when the original Responses request
+// is unavailable. Fall back to the {"input": string} envelope emitted by
+// convertResponsesCustomToolToClaude so the classification survives either way;
+// misclassifying here would emit function_call items whose fc_ ids strict
+// Responses upstreams reject on replay.
+func isResponsesCustomToolDeclaration(tool gjson.Result) bool {
+	if strings.TrimSpace(tool.Get("type").String()) == "custom" {
+		return true
+	}
+	return tool.Get("input_schema.properties.input.description").String() == freeformToolInputDescription
+}
+
+// ensureCustomToolNames resolves the request's custom tool declarations on first
+// use. message_start normally primes this, but that event does not always reach
+// the converter — some Kiro paths emit it straight to the downstream channel —
+// and an unresolved map would silently downgrade custom_tool_call items to
+// function_call. Those items carry an fc_ id, which strict Responses upstreams
+// reject once the client replays them under their declared custom_tool_call
+// type ("Expected an ID that begins with 'ctc'").
+func (st *claudeToResponsesState) ensureCustomToolNames(requestJSON []byte) {
+	if st.CustomToolNamesReady {
+		return
+	}
+	st.CustomToolNames = responsesCustomToolNames(requestJSON)
+	st.CustomToolNamesReady = true
 }
 
 // unwrapResponsesCustomToolInput extracts the freeform payload from the
@@ -379,6 +414,7 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 			st.FuncOutputIndices = make(map[int]int)
 			st.FuncIsCustom = make(map[int]bool)
 			st.CustomToolNames = responsesCustomToolNames(reqBytes)
+			st.CustomToolNamesReady = true
 			st.Usage = claudeResponsesUsageTokens{}
 			st.Usage.Merge(msg.Get("usage"))
 			// response.created
@@ -431,6 +467,7 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 			st.CurrentFCID = cb.Get("id").String()
 			name := cb.Get("name").String()
 			outputIndex := st.functionOutputIndex(idx)
+			st.ensureCustomToolNames(pickRequestJSON(originalRequestRawJSON, requestRawJSON))
 			if st.CustomToolNames[name] {
 				st.FuncIsCustom[idx] = true
 				item := []byte(`{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"id":"","type":"custom_tool_call","status":"in_progress","call_id":"","name":"","input":""}}`)
