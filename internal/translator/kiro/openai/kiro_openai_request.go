@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	kiroclaude "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/claude"
 	kirocommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/common"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
@@ -336,23 +337,32 @@ func extractMetadataFromMessages(messages gjson.Result, key string) string {
 	return ""
 }
 
-// extractSystemPromptFromOpenAI extracts system prompt from OpenAI messages
+// extractSystemPromptFromOpenAI extracts system prompt from OpenAI messages.
+// Lines carrying first-party agent data (the Claude Code attribution header
+// and agent identity lines opening with "You are") are dropped via
+// util.FilterAgentSystemLines for the same reasons as in the Claude request
+// translator.
 func extractSystemPromptFromOpenAI(messages gjson.Result) string {
 	if !messages.IsArray() {
 		return ""
 	}
 
 	var systemParts []string
+	appendPart := func(text string) {
+		if text = util.FilterAgentSystemLines(text); text != "" {
+			systemParts = append(systemParts, text)
+		}
+	}
 	for _, msg := range messages.Array() {
 		if msg.Get("role").String() == "system" {
 			content := msg.Get("content")
 			if content.Type == gjson.String {
-				systemParts = append(systemParts, content.String())
+				appendPart(content.String())
 			} else if content.IsArray() {
 				// Handle array content format
 				for _, part := range content.Array() {
 					if part.Get("type").String() == "text" {
-						systemParts = append(systemParts, part.Get("text").String())
+						appendPart(part.Get("text").String())
 					}
 				}
 			}
