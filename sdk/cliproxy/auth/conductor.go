@@ -388,9 +388,12 @@ func (m *Manager) RefreshSchedulerAll() {
 // registry snapshot for one auth.
 //
 // Supported models are reset to a clean state because re-registration already
-// cleared the registry-side cooldown/suspension snapshot. ModelStates for
-// models that are no longer present in the registry are pruned entirely so
-// renamed/removed models cannot keep auth-level status stale.
+// cleared the registry-side cooldown/suspension snapshot. Cooldowns that have not
+// elapsed yet are the exception: re-registration is also triggered by credential
+// refresh, which rewrites the auth file on a timer, so resetting them would
+// resurrect a credential the upstream still rejects. ModelStates for models that
+// are no longer present in the registry are pruned entirely so renamed/removed
+// models cannot keep auth-level status stale.
 func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID string) {
 	if m == nil || authID == "" {
 		return
@@ -433,6 +436,9 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 				continue
 			}
 			if modelStateIsClean(state) {
+				continue
+			}
+			if modelStateCoolingDown(state, now) {
 				continue
 			}
 			resetModelState(state, now)
@@ -3928,6 +3934,16 @@ func resetModelState(state *ModelState, now time.Time) {
 	state.LastError = nil
 	state.Quota = QuotaState{}
 	state.UpdatedAt = now
+}
+
+// modelStateCoolingDown reports whether the model is serving a cooldown that has
+// not elapsed yet. A zero NextRetryAfter means the failure carried no cooldown,
+// so it is not treated as cooling down.
+func modelStateCoolingDown(state *ModelState, now time.Time) bool {
+	if state == nil || !state.Unavailable {
+		return false
+	}
+	return !state.NextRetryAfter.IsZero() && state.NextRetryAfter.After(now)
 }
 
 func modelStateIsClean(state *ModelState) bool {

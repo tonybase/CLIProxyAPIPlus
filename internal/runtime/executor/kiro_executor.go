@@ -923,12 +923,10 @@ func (e *KiroExecutor) executeWithRetry(ctx context.Context, auth *cliproxyauth.
 				_ = httpResp.Body.Close()
 				appendAPIResponseChunk(ctx, e.cfg, respBody)
 
-				// Monthly request quota is account-scoped rather than model-scoped, so cool down
-				// the whole account when the upstream confirms it via MONTHLY_REQUEST_COUNT.
-				// Other 402 reasons fall back to the per-model cooldown handled by the conductor.
-				if strings.Contains(string(respBody), "MONTHLY_REQUEST_COUNT") {
-					cooldownMgr.SetCooldown(tokenKey, kiroauth.LongCooldown, kiroauth.CooldownReasonQuotaExhausted)
-				}
+				// Monthly limits are reported to the auth manager through the 402 below,
+				// which owns the cooldown: it persists the state, exposes it to the
+				// selector so another credential is picked, and lets the management API
+				// reset it. A local cooldown would bypass all three.
 				log.Warnf("kiro: received 402 (monthly limit). account=%s label=%s token=%s. Upstream body: %s",
 					auth.ID, auth.Label, tokenKey, string(respBody))
 
@@ -1376,12 +1374,7 @@ func (e *KiroExecutor) executeStreamWithRetry(ctx context.Context, auth *cliprox
 				_ = httpResp.Body.Close()
 				appendAPIResponseChunk(ctx, e.cfg, respBody)
 
-				// Monthly request quota is account-scoped rather than model-scoped, so cool down
-				// the whole account when the upstream confirms it via MONTHLY_REQUEST_COUNT.
-				// Other 402 reasons fall back to the per-model cooldown handled by the conductor.
-				if strings.Contains(string(respBody), "MONTHLY_REQUEST_COUNT") {
-					cooldownMgr.SetCooldown(tokenKey, kiroauth.LongCooldown, kiroauth.CooldownReasonQuotaExhausted)
-				}
+				// See the non-stream path: the auth manager owns the cooldown for 402.
 				log.Warnf("kiro: stream received 402 (monthly limit). account=%s label=%s model=%s token=%s. Upstream body: %s",
 					auth.ID, auth.Label, kiroModelID, tokenKey, string(respBody))
 
