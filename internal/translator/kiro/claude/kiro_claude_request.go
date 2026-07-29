@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	kirocommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/common"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
@@ -346,21 +347,34 @@ func extractMetadataFromMessages(messages gjson.Result, key string) string {
 	return ""
 }
 
-// extractSystemPrompt extracts system prompt from Claude request
+// extractSystemPrompt extracts system prompt from Claude request.
+//
+// Lines carrying first-party agent data are dropped
+// (util.FilterAgentSystemLines): the Claude Code attribution header carries
+// per-request billing and prompt fingerprint data that is meaningless to
+// Kiro, and agent identity lines ("You are Claude Code, ...", "You are
+// Codex, ...") conflict with the upstream identity set by the Kiro service
+// and can trigger an injection-refusal preamble in the reply. Filtering is
+// line by line so content following a dropped line survives. The remaining
+// blocks are joined with newlines so each stays at a line start.
 func extractSystemPrompt(claudeBody []byte) string {
 	systemField := gjson.GetBytes(claudeBody, "system")
 	if systemField.IsArray() {
-		var sb strings.Builder
+		parts := make([]string, 0, len(systemField.Array()))
 		for _, block := range systemField.Array() {
+			var text string
 			if block.Get("type").String() == "text" {
-				sb.WriteString(block.Get("text").String())
+				text = block.Get("text").String()
 			} else if block.Type == gjson.String {
-				sb.WriteString(block.String())
+				text = block.String()
+			}
+			if text = util.FilterAgentSystemLines(text); text != "" {
+				parts = append(parts, text)
 			}
 		}
-		return sb.String()
+		return strings.Join(parts, "\n")
 	}
-	return systemField.String()
+	return util.FilterAgentSystemLines(systemField.String())
 }
 
 // checkThinkingMode checks if thinking mode is enabled in the Claude request
@@ -647,7 +661,11 @@ func convertClaudeToolsToKiro(tools gjson.Result) []KiroToolWrapper {
 // tags (the same convention Claude Code uses for system notes inside user
 // turns). The top-level "system" request field is handled separately and is
 // not affected. Non-text blocks in a system message are dropped, matching how
-// the Claude API treats system message content as plain text.
+// the Claude API treats system message content as plain text. Lines carrying
+// first-party agent data are filtered (util.FilterAgentSystemLines) for the
+// same reasons as in extractSystemPrompt; the message itself is kept even
+// when filtering empties it, because a trailing system message must still
+// produce a current user message for tool specs to attach to.
 func normalizeInArraySystemMessages(messages []gjson.Result) []gjson.Result {
 	for i, msg := range messages {
 		if msg.Get("role").String() != "system" {
@@ -667,7 +685,7 @@ func normalizeInArraySystemMessages(messages []gjson.Result) []gjson.Result {
 		converted, err := json.Marshal(map[string]interface{}{
 			"role": "user",
 			"content": []map[string]string{
-				{"type": "text", "text": "<system-reminder>\n" + text.String() + "\n</system-reminder>"},
+				{"type": "text", "text": "<system-reminder>\n" + util.FilterAgentSystemLines(text.String()) + "\n</system-reminder>"},
 			},
 		})
 		if err != nil {

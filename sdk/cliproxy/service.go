@@ -745,6 +745,18 @@ func (s *Service) prepareCoreAuthForModelRegistration(ctx context.Context, auth 
 			if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
 				auth.ModelStates = existing.ModelStates
 			}
+			// This auth was rebuilt from disk, where runtime-only failure state does
+			// not exist, so carry it over: a token refresh rewrites the credential
+			// file every minute and the watcher picks it up seconds later, which
+			// would otherwise drop the cooldown reason the management UI shows.
+			// Recovery still clears it through the request path, which sees actual
+			// success rather than a file rewrite.
+			auth.Status = existing.Status
+			auth.StatusMessage = existing.StatusMessage
+			auth.LastError = existing.LastError
+			auth.Unavailable = existing.Unavailable
+			auth.NextRetryAfter = existing.NextRetryAfter
+			auth.Quota = existing.Quota
 		}
 		op = "update"
 		_, err = s.coreManager.Update(ctx, auth)

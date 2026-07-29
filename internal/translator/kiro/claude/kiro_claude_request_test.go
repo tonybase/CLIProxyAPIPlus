@@ -180,3 +180,98 @@ func TestSynthesizeToolSpecsFromHistory_Dedup(t *testing.T) {
 		}
 	}
 }
+
+// TestExtractSystemPrompt_StripsClaudeCodeAttribution covers the Claude Code
+// system layout: system[0] is the x-anthropic-billing-header attribution block,
+// system[1] the product identity line. Both are dropped — the attribution
+// block by util.IsClaudeCodeAttributionSystemText and the identity block by
+// the "You are" prefix check — so only the remaining blocks survive.
+func TestExtractSystemPrompt_StripsClaudeCodeAttribution(t *testing.T) {
+	claudeReq := `{
+		"model": "claude-sonnet-4-5",
+		"system": [
+			{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.178.8ae; cc_entrypoint=cli; cch=abd35;"},
+			{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
+			{"type": "text", "text": "Tone and style: be concise."}
+		],
+		"messages": [{"role": "user", "content": "hi"}]
+	}`
+
+	got := extractSystemPrompt([]byte(claudeReq))
+	if strings.Contains(got, "x-anthropic-billing-header") {
+		t.Fatalf("attribution block was not stripped: %q", got)
+	}
+	if strings.Contains(got, "Claude Code") {
+		t.Fatalf("identity block was not stripped: %q", got)
+	}
+	if got != "Tone and style: be concise." {
+		t.Fatalf("only the behavioral block should survive, got: %q", got)
+	}
+}
+
+// TestExtractSystemPrompt_StringAttributionOnly ensures a plain-string system
+// field holding only the attribution block yields an empty prompt.
+func TestExtractSystemPrompt_StringAttributionOnly(t *testing.T) {
+	claudeReq := `{"system": "x-anthropic-billing-header: cc_version=1.0.abc; cch=00000;", "messages": []}`
+	if got := extractSystemPrompt([]byte(claudeReq)); got != "" {
+		t.Fatalf("expected empty system prompt, got %q", got)
+	}
+}
+
+// TestNormalizeInArraySystemMessages_FiltersAgentData covers in-array
+// role:"system" messages (Claude Code mid-conversation-system beta): they are
+// rewritten as <system-reminder> user messages, and lines carrying
+// first-party agent data must be filtered the same way as the top-level
+// system field. The message structure is preserved even when filtering
+// empties the content, since a trailing system message must still produce a
+// current user message for tool specs to attach to.
+func TestNormalizeInArraySystemMessages_FiltersAgentData(t *testing.T) {
+	messages := []gjson.Result{
+		gjson.Parse(`{"role": "system", "content": "You are Claude Code"}`),
+		gjson.Parse(`{"role": "system", "content": "Note: the user opened main.go.\nYou are Claude Code, Anthropic's official CLI."}`),
+		gjson.Parse(`{"role": "user", "content": "hi"}`),
+	}
+
+	got := normalizeInArraySystemMessages(messages)
+
+	if len(got) != 3 {
+		t.Fatalf("message count must be preserved, got %d", len(got))
+	}
+	first := got[0].Get("content.0.text").String()
+	if !strings.Contains(first, "<system-reminder>") {
+		t.Fatalf("system message must still be rewritten as a user message, got: %q", first)
+	}
+	if strings.Contains(first, "You are Claude Code") {
+		t.Fatalf("identity-only system message was not filtered, got: %q", first)
+	}
+	second := got[1].Get("content.0.text").String()
+	if strings.Contains(second, "You are Claude Code") {
+		t.Fatalf("identity line inside a mixed system message was not filtered, got: %q", second)
+	}
+	if !strings.Contains(second, "Note: the user opened main.go.") {
+		t.Fatalf("non-agent lines must survive filtering, got: %q", second)
+	}
+	if got[2].Get("role").String() != "user" {
+		t.Fatalf("non-system messages must be untouched, got role: %q", got[2].Get("role").String())
+	}
+}
+
+// TestExtractSystemPrompt_FiltersAgentIdentityString covers the Codex layout
+// arriving via the Responses converter: a single string system field opening
+// with the agent identity. Filtering is line by line, so the identity line is
+// dropped while the sections after it survive.
+func TestExtractSystemPrompt_FiltersAgentIdentityString(t *testing.T) {
+	claudeReq := `{
+		"model": "gpt-5",
+		"system": "You are Codex, a coding agent based on GPT-5. You and the user share one workspace.\n\n# Personality",
+		"messages": [{"role": "user", "content": "hi"}]
+	}`
+
+	got := extractSystemPrompt([]byte(claudeReq))
+	if strings.Contains(got, "Codex") {
+		t.Fatalf("identity line was not stripped: %q", got)
+	}
+	if !strings.Contains(got, "# Personality") {
+		t.Fatalf("sections after the identity line must survive: %q", got)
+	}
+}
