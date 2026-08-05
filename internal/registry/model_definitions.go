@@ -829,8 +829,8 @@ func GetKiroModels() []*ModelInfo {
 			Type:                "kiro",
 			DisplayName:         entry.displayName,
 			Description:         entry.description,
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
+			ContextLength:       DefaultKiroContextLength,
+			MaxCompletionTokens: DefaultKiroMaxCompletionTokens,
 			SupportedEndpoints:  endpoints,
 			Thinking:            cloneThinkingSupport(DefaultKiroThinkingSupport),
 		})
