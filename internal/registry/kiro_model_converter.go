@@ -38,7 +38,11 @@ var DefaultKiroThinkingSupport = &ThinkingSupport{
 }
 
 // DefaultKiroContextLength is the default context window size for Kiro models.
-const DefaultKiroContextLength = 1000000
+// Kiro reports usage as contextUsagePercentage of this window, and the Codex
+// client divides the reconstructed token count by the same 272000 window from
+// its built-in catalog. Both sides must agree, otherwise the client scales the
+// percentage and auto-compacts far below the real limit.
+const DefaultKiroContextLength = 272000
 
 // DefaultKiroMaxCompletionTokens is the default max completion tokens for Kiro models.
 const DefaultKiroMaxCompletionTokens = 64000
