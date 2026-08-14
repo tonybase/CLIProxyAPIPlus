@@ -120,6 +120,29 @@
       }
     },
     {
+      "id": "claude-opus-5",
+      "object": "model",
+      "created": 1784332800,
+      "owned_by": "anthropic",
+      "type": "claude",
+      "display_name": "Claude Opus 5",
+      "description": "Anthropic's most capable Opus model for the most demanding reasoning and long-horizon agentic work",
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "thinking": {
+        "min": 1024,
+        "max": 128000,
+        "zero_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    },
+    {
       "id": "claude-sonnet-5",
       "object": "model",
       "created": 1782777600,
@@ -1438,7 +1461,7 @@
       "display_name": "GPT 5.6 Terra",
       "version": "gpt-5.6",
       "description": "Balanced agentic coding model for everyday work.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1462,7 +1485,7 @@
       "display_name": "GPT 5.6 Luna",
       "version": "gpt-5.6",
       "description": "Fast and affordable agentic coding model.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1586,7 +1609,7 @@
       "display_name": "GPT 5.6 Sol",
       "version": "gpt-5.6",
       "description": "Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce polished documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts—try starting lower, then turn it up for harder jobs.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1610,7 +1633,7 @@
       "display_name": "GPT 5.6 Terra",
       "version": "gpt-5.6",
       "description": "Balanced agentic coding model for everyday work.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1634,7 +1657,7 @@
       "display_name": "GPT 5.6 Luna",
       "version": "gpt-5.6",
       "description": "Fast and affordable agentic coding model.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1781,7 +1804,7 @@
       "display_name": "GPT 5.6 Sol",
       "version": "gpt-5.6",
       "description": "Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce polished documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts—try starting lower, then turn it up for harder jobs.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1805,7 +1828,7 @@
       "display_name": "GPT 5.6 Terra",
       "version": "gpt-5.6",
       "description": "Balanced agentic coding model for everyday work.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1829,7 +1852,7 @@
       "display_name": "GPT 5.6 Luna",
       "version": "gpt-5.6",
       "description": "Fast and affordable agentic coding model.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -1976,7 +1999,7 @@
       "display_name": "GPT 5.6 Sol",
       "version": "gpt-5.6",
       "description": "Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce polished documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts—try starting lower, then turn it up for harder jobs.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2000,7 +2023,7 @@
       "display_name": "GPT 5.6 Terra",
       "version": "gpt-5.6",
       "description": "Balanced agentic coding model for everyday work.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2024,7 +2047,7 @@
       "display_name": "GPT 5.6 Luna",
       "version": "gpt-5.6",
       "description": "Fast and affordable agentic coding model.",
-      "context_length": 372000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
