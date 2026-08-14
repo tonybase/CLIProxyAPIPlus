@@ -67,18 +67,18 @@ var kiroContextLengths = map[string]int{
 	"gpt-5-6-terra": 272000,
 
 	// Measured ~693K, calibrated against the tokenizer's known undercount.
-	"claude-opus-5": 900000,
+	"claude-opus-5":     922000,
+	"claude-opus-4-6":   922000,
+	"claude-opus-4-7":   922000,
+	"claude-opus-4-8":   922000,
+	"claude-sonnet-4-5": 922000,
+	"claude-sonnet-4-6": 922000,
 
 	// Claude 4.x models share the 200K family window: claude-haiku-4-5 measured
 	// ~155K (matching that window), and the remainder follow the same family.
-	"claude-haiku-4-5":  200000,
-	"claude-opus-4-5":   200000,
-	"claude-opus-4-6":   200000,
-	"claude-opus-4-7":   200000,
-	"claude-opus-4-8":   200000,
-	"claude-sonnet-4":   200000,
-	"claude-sonnet-4-5": 200000,
-	"claude-sonnet-4-6": 200000,
+	"claude-haiku-4-5": 200000,
+	"claude-opus-4-5":  200000,
+	"claude-sonnet-4":  200000,
 }
 
 // KiroContextLengthForModel returns the context window for a Kiro model.
