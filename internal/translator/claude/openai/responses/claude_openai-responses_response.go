@@ -121,15 +121,31 @@ func normalizeResponsesID(rawID string) (responseID, baseID string) {
 // in the request so tool_use blocks can be emitted as custom_tool_call items.
 func responsesCustomToolNames(requestRawJSON []byte) map[string]bool {
 	var names map[string]bool
+	add := func(name string) {
+		if name == "" {
+			return
+		}
+		if names == nil {
+			names = make(map[string]bool)
+		}
+		names[name] = true
+	}
 	forEachResponsesTool(requestRawJSON, func(tool gjson.Result) bool {
-		if !isResponsesCustomToolDeclaration(tool) {
+		// Namespaced custom tools (codex declares exec under the "functions"
+		// namespace) reach the model as namespace__child, which is the name
+		// tool_use blocks echo back, so index the qualified form.
+		if strings.TrimSpace(tool.Get("type").String()) == "namespace" {
+			namespaceName := strings.TrimSpace(tool.Get("name").String())
+			tool.Get("tools").ForEach(func(_, child gjson.Result) bool {
+				if isResponsesCustomToolDeclaration(child) {
+					add(qualifyResponsesNamespaceToolName(namespaceName, responsesToolName(child)))
+				}
+				return true
+			})
 			return true
 		}
-		if name := strings.TrimSpace(tool.Get("name").String()); name != "" {
-			if names == nil {
-				names = make(map[string]bool)
-			}
-			names[name] = true
+		if isResponsesCustomToolDeclaration(tool) {
+			add(strings.TrimSpace(tool.Get("name").String()))
 		}
 		return true
 	})
@@ -477,7 +493,7 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 				// Responses upstreams reject an fc_ id when the item is replayed.
 				item, _ = sjson.SetBytes(item, "item.id", fmt.Sprintf("ctc_%s", st.CurrentFCID))
 				item, _ = sjson.SetBytes(item, "item.call_id", st.CurrentFCID)
-				item, _ = sjson.SetBytes(item, "item.name", name)
+				item = applyResponsesFunctionCallNamespaceFields(item, pickRequestJSON(originalRequestRawJSON, requestRawJSON), name, "item")
 				out = append(out, emitEvent("response.output_item.added", item))
 			} else {
 				item := []byte(`{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"id":"","type":"function_call","status":"in_progress","arguments":"","call_id":"","name":""}}`)
@@ -622,7 +638,7 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 				itemDone, _ = sjson.SetBytes(itemDone, "output_index", outputIndex)
 				itemDone, _ = sjson.SetBytes(itemDone, "item.id", fmt.Sprintf("ctc_%s", st.CurrentFCID))
 				itemDone, _ = sjson.SetBytes(itemDone, "item.call_id", st.CurrentFCID)
-				itemDone, _ = sjson.SetBytes(itemDone, "item.name", st.FuncNames[idx])
+				itemDone = applyResponsesFunctionCallNamespaceFields(itemDone, pickRequestJSON(originalRequestRawJSON, requestRawJSON), st.FuncNames[idx], "item")
 				itemDone, _ = sjson.SetBytes(itemDone, "item.input", input)
 				out = append(out, emitEvent("response.output_item.done", itemDone))
 				st.InFuncBlock = false
@@ -740,7 +756,7 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 					item := []byte(`{"id":"","type":"custom_tool_call","status":"completed","call_id":"","name":"","input":""}`)
 					item, _ = sjson.SetBytes(item, "id", fmt.Sprintf("ctc_%s", callID))
 					item, _ = sjson.SetBytes(item, "call_id", callID)
-					item, _ = sjson.SetBytes(item, "name", name)
+					item = applyResponsesFunctionCallNamespaceFields(item, reqBytes, name, "")
 					item, _ = sjson.SetBytes(item, "input", unwrapResponsesCustomToolInput(args))
 					outputsWrapper, _ = sjson.SetRawBytes(outputsWrapper, fmt.Sprintf("arr.%d", st.FuncOutputIndices[idx]), item)
 					continue
@@ -974,7 +990,7 @@ func ConvertClaudeResponseToOpenAIResponsesNonStream(_ context.Context, _ string
 				item := []byte(`{"id":"","type":"custom_tool_call","status":"completed","call_id":"","name":"","input":""}`)
 				item, _ = sjson.SetBytes(item, "id", fmt.Sprintf("ctc_%s", st.id))
 				item, _ = sjson.SetBytes(item, "call_id", st.id)
-				item, _ = sjson.SetBytes(item, "name", st.name)
+				item = applyResponsesFunctionCallNamespaceFields(item, reqBytes, st.name, "")
 				item, _ = sjson.SetBytes(item, "input", unwrapResponsesCustomToolInput(args))
 				outputsWrapper, _ = sjson.SetRawBytes(outputsWrapper, "arr.-1", item)
 				continue

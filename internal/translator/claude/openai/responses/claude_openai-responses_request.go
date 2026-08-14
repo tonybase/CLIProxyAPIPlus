@@ -391,7 +391,7 @@ func ConvertOpenAIResponsesRequestToClaude(modelName string, inputRawJSON []byte
 					callID = genToolCallID()
 				}
 				callID = util.SanitizeClaudeToolID(callID)
-				name := item.Get("name").String()
+				name := responsesToolUseName(item)
 				argsStr := item.Get("arguments").String()
 
 				toolUse := []byte(`{"type":"tool_use","id":"","name":"","input":{}}`)
@@ -424,7 +424,7 @@ func ConvertOpenAIResponsesRequestToClaude(modelName string, inputRawJSON []byte
 					callID = genToolCallID()
 				}
 				callID = util.SanitizeClaudeToolID(callID)
-				name := item.Get("name").String()
+				name := responsesToolUseName(item)
 
 				toolUse := []byte(`{"type":"tool_use","id":"","name":"","input":{}}`)
 				toolUse, _ = sjson.SetBytes(toolUse, "id", callID)
@@ -559,6 +559,20 @@ func responsesReasoningSummaryText(item gjson.Result) string {
 	return builder.String()
 }
 
+// responsesToolUseName resolves the name a replayed tool call must carry.
+// Namespaced tools are declared to Claude under their namespace__child name
+// (see convertResponsesNamespaceToolToClaude) while Responses clients echo the
+// namespace back in a sibling field, so re-qualify the name — an unqualified
+// tool_use would not match any declared tool.
+func responsesToolUseName(item gjson.Result) string {
+	name := strings.TrimSpace(item.Get("name").String())
+	namespace := strings.TrimSpace(item.Get("namespace").String())
+	if namespace == "" {
+		return name
+	}
+	return qualifyResponsesNamespaceToolName(namespace, name)
+}
+
 func applyResponsesToolResultContent(toolResult []byte, output gjson.Result) []byte {
 	if output.Exists() && output.IsArray() {
 		var partsJSON []string
@@ -681,7 +695,7 @@ func convertResponsesToolToClaudeTools(tool gjson.Result, toolNameMap map[string
 			return [][]byte{tJSON}
 		}
 	case "custom":
-		if tJSON, ok := convertResponsesCustomToolToClaude(tool); ok {
+		if tJSON, ok := convertResponsesCustomToolToClaude(tool, ""); ok {
 			return [][]byte{tJSON}
 		}
 	default:
@@ -707,19 +721,29 @@ const freeformToolInputDescription = "Freeform tool input payload."
 // JSON objects, so the freeform payload is wrapped in an {"input": "..."}
 // envelope; any grammar definition is preserved in the description so the
 // model still knows the required textual format. The response converter
-// unwraps the envelope back into a custom_tool_call item.
-func convertResponsesCustomToolToClaude(tool gjson.Result) ([]byte, bool) {
-	name := responsesToolName(tool)
+// unwraps the envelope back into a custom_tool_call item. overrideName carries
+// the namespace-qualified name when the tool is declared inside a namespace.
+func convertResponsesCustomToolToClaude(tool gjson.Result, overrideName string) ([]byte, bool) {
+	name := strings.TrimSpace(overrideName)
+	if name == "" {
+		name = responsesToolName(tool)
+	}
 	if name == "" {
 		return nil, false
 	}
 
 	description := responsesToolDescription(tool)
+	// Providers such as Kiro truncate over-long tool descriptions from the
+	// tail, so lead with the grammar contract: dropping it leaves the model
+	// guessing the input format, while dropping trailing prose only costs
+	// supporting detail.
 	if definition := strings.TrimSpace(tool.Get("format.definition").String()); definition != "" {
+		grammar := "The `input` string MUST follow this grammar:\n" + definition
 		if description != "" {
-			description += "\n\n"
+			description = grammar + "\n\n" + description
+		} else {
+			description = grammar
 		}
-		description += "The `input` string MUST follow this grammar:\n" + definition
 	}
 
 	tJSON := []byte(`{"name":"","description":"","input_schema":{"type":"object","properties":{"input":{"type":"string","description":""}},"required":["input"],"additionalProperties":false}}`)
@@ -741,7 +765,20 @@ func convertResponsesNamespaceToolToClaude(tool gjson.Result, toolNameMap map[st
 	children.ForEach(func(_, child gjson.Result) bool {
 		childName := responsesToolName(child)
 		qualifiedName := qualifyResponsesNamespaceToolName(namespaceName, childName)
-		if tJSON, ok := convertResponsesFunctionToolToClaude(child, qualifiedName); ok {
+		// Namespaced children carry their own type; freeform custom tools must
+		// keep the {"input": string} envelope and grammar hint that
+		// convertResponsesCustomToolToClaude adds, otherwise the response
+		// converter cannot recover the custom_tool_call classification.
+		var (
+			tJSON []byte
+			ok    bool
+		)
+		if strings.TrimSpace(child.Get("type").String()) == "custom" {
+			tJSON, ok = convertResponsesCustomToolToClaude(child, qualifiedName)
+		} else {
+			tJSON, ok = convertResponsesFunctionToolToClaude(child, qualifiedName)
+		}
+		if ok {
 			out = append(out, tJSON)
 			toolNameMap[qualifiedName] = qualifiedName
 			if childName != "" {
