@@ -3152,7 +3152,7 @@ func convertKiroAPIModels(apiModels []*kiroauth.KiroModel) []*ModelInfo {
 			Type:                "kiro",
 			DisplayName:         formatKiroDisplayName(m.ModelName, m.RateMultiplier),
 			Description:         m.Description,
-			ContextLength:       registry.DefaultKiroContextLength,
+			ContextLength:       registry.KiroContextLengthForModel(modelID),
 			MaxCompletionTokens: registry.DefaultKiroMaxCompletionTokens,
 			Thinking:            &registry.ThinkingSupport{Min: 1024, Max: 32000, ZeroAllowed: true, DynamicAllowed: true},
 		}

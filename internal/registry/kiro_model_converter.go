@@ -37,12 +37,93 @@ var DefaultKiroThinkingSupport = &ThinkingSupport{
 	DynamicAllowed: true,  // Allow dynamic thinking budget (-1)
 }
 
-// DefaultKiroContextLength is the default context window size for Kiro models.
-// Kiro reports usage as contextUsagePercentage of this window, and the Codex
-// client divides the reconstructed token count by the same 272000 window from
-// its built-in catalog. Both sides must agree, otherwise the client scales the
-// percentage and auto-compacts far below the real limit.
-const DefaultKiroContextLength = 272000
+// DefaultKiroContextLength is the fallback context window for Kiro models whose
+// real window we have not measured.
+//
+// Kiro never reports absolute input tokens, only contextUsagePercentage, so this
+// value doubles as the denominator used to reconstruct input_tokens. The two
+// error directions are not symmetric: advertising a window larger than the real
+// one makes clients under-count usage and skip compaction until Kiro rejects the
+// turn outright, while advertising a smaller one only compacts early. The
+// default therefore stays slightly under the 1M ceiling of the newest models to
+// absorb the tokens Kiro counts but we cannot see (injected system prompt, tool
+// schemas re-serialized upstream, per-message framing) and to leave room for the
+// completion, which shares the same window.
+const DefaultKiroContextLength = 900000
+
+// kiroContextLengths maps normalized Kiro model IDs to their context window.
+// Keys carry no "kiro-" prefix and no "-agentic" suffix; see
+// KiroContextLengthForModel for the lookup rules.
+//
+// A single global window cannot serve this fleet: the measured values span more
+// than 4x, so reusing one constant necessarily breaks every model it does not
+// match. Values below were derived by dividing the local tokenizer count by
+// contextUsagePercentage, then rounding to the vendor's advertised window.
+var kiroContextLengths = map[string]int{
+	// Measured ~264K, and the Codex client's built-in catalog independently
+	// advertises 272000 for these slugs.
+	"gpt-5-6-sol":   272000,
+	"gpt-5-6-luna":  272000,
+	"gpt-5-6-terra": 272000,
+
+	// Measured ~693K, calibrated against the tokenizer's known undercount.
+	"claude-opus-5": 900000,
+
+	// Claude 4.x models share the 200K family window: claude-haiku-4-5 measured
+	// ~155K (matching that window), and the remainder follow the same family.
+	"claude-haiku-4-5":  200000,
+	"claude-opus-4-5":   200000,
+	"claude-opus-4-6":   200000,
+	"claude-opus-4-7":   200000,
+	"claude-opus-4-8":   200000,
+	"claude-sonnet-4":   200000,
+	"claude-sonnet-4-5": 200000,
+	"claude-sonnet-4-6": 200000,
+}
+
+// KiroContextLengthForModel returns the context window for a Kiro model.
+//
+// The model ID reaching callers varies by request path: it may carry the
+// "kiro-" prefix or not, use dots instead of hyphens, and carry an "-agentic"
+// or thinking-level suffix. Lookup therefore normalizes first, then falls back
+// to the longest matching prefix so suffixed variants resolve to their base
+// model instead of silently landing on the default.
+func KiroContextLengthForModel(modelID string) int {
+	key := normalizeKiroContextKey(modelID)
+	if key == "" {
+		return DefaultKiroContextLength
+	}
+	if length, ok := kiroContextLengths[key]; ok {
+		return length
+	}
+
+	bestMatch := ""
+	for candidate := range kiroContextLengths {
+		if !strings.HasPrefix(key, candidate) {
+			continue
+		}
+		if len(candidate) > len(bestMatch) {
+			bestMatch = candidate
+		}
+	}
+	if bestMatch != "" {
+		return kiroContextLengths[bestMatch]
+	}
+	return DefaultKiroContextLength
+}
+
+// normalizeKiroContextKey reduces a model ID to the form used as a
+// kiroContextLengths key.
+func normalizeKiroContextKey(modelID string) string {
+	key := strings.ToLower(strings.TrimSpace(modelID))
+	if key == "" {
+		return ""
+	}
+	key = strings.ReplaceAll(key, ".", "-")
+	key = strings.TrimPrefix(key, "kiro-")
+	key = strings.TrimSuffix(key, "-agentic")
+	return key
+}
 
 // DefaultKiroMaxCompletionTokens is the default max completion tokens for Kiro models.
 const DefaultKiroMaxCompletionTokens = 64000

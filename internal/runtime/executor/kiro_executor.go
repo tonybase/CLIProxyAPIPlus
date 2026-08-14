@@ -1006,7 +1006,7 @@ func (e *KiroExecutor) executeWithRetry(ctx context.Context, auth *cliproxyauth.
 				}
 			}()
 
-			parsed, err := e.parseEventStream(httpResp.Body)
+			parsed, err := e.parseEventStream(httpResp.Body, payloadRequestedModel(opts, req.Model))
 			if err != nil {
 				recordAPIResponseError(ctx, e.cfg, err)
 				return resp, err
@@ -1721,11 +1721,16 @@ func finalizeKiroUsageTotal(detail *usage.Detail) {
 		detail.CacheCreationTokens
 }
 
-func applyKiroContextUsageFallback(detail *usage.Detail, contextUsagePercentage float64, hasPreciseTokenUsage bool) (int64, bool) {
+// applyKiroContextUsageFallback reconstructs input_tokens from the percentage
+// Kiro reports when no precise token usage is available. The window must match
+// the model: reconstructing against a larger window than the model actually has
+// under-reports usage and lets clients run past the real limit.
+func applyKiroContextUsageFallback(detail *usage.Detail, contextUsagePercentage float64, hasPreciseTokenUsage bool, model string) (int64, bool) {
 	if detail == nil || contextUsagePercentage <= 0 || hasPreciseTokenUsage {
 		return 0, false
 	}
-	calculatedInputTokens := int64(contextUsagePercentage * registry.DefaultKiroContextLength / 100)
+	contextLength := registry.KiroContextLengthForModel(model)
+	calculatedInputTokens := int64(contextUsagePercentage * float64(contextLength) / 100)
 	if calculatedInputTokens <= 0 {
 		return 0, false
 	}
@@ -1840,7 +1845,9 @@ func normalizeKiroWebSearchToolName(name string) string {
 	return name
 }
 
-func (e *KiroExecutor) parseEventStream(body io.Reader) (*kiroParsedStream, error) {
+// parseEventStream consumes a non-streaming Kiro event stream response. The
+// model is needed to pick the context window used to reconstruct input tokens.
+func (e *KiroExecutor) parseEventStream(body io.Reader, model string) (*kiroParsedStream, error) {
 	var content strings.Builder
 	var toolUses []kiroclaude.KiroToolUse
 	var usageInfo usage.Detail
@@ -2321,9 +2328,9 @@ func (e *KiroExecutor) parseEventStream(body io.Reader) (*kiroParsedStream, erro
 
 	// Use contextUsagePercentage to calculate more accurate input tokens
 	// contextUsagePercentage represents the percentage of the Kiro context window used
-	// Formula: input_tokens = contextUsagePercentage * registry.DefaultKiroContextLength / 100
+	// Formula: input_tokens = contextUsagePercentage * model context window / 100
 	localEstimate := usageInfo.InputTokens
-	if calculatedInputTokens, ok := applyKiroContextUsageFallback(&usageInfo, upstreamContextPercentage, hasPreciseTokenUsage); ok {
+	if calculatedInputTokens, ok := applyKiroContextUsageFallback(&usageInfo, upstreamContextPercentage, hasPreciseTokenUsage, model); ok {
 		log.Infof("kiro: parseEventStream using contextUsagePercentage (%.2f%%) to calculate input tokens: %d (local estimate was: %d)",
 			upstreamContextPercentage, calculatedInputTokens, localEstimate)
 	}
@@ -3707,10 +3714,10 @@ func (e *KiroExecutor) streamToChannel(ctx context.Context, body io.Reader, out 
 
 	// Use contextUsagePercentage to calculate more accurate input tokens
 	// contextUsagePercentage represents the percentage of the Kiro context window used
-	// Formula: input_tokens = contextUsagePercentage * registry.DefaultKiroContextLength / 100
+	// Formula: input_tokens = contextUsagePercentage * model context window / 100
 	// Note: part of the context window is reserved for output
 	localEstimate := totalUsage.InputTokens
-	if calculatedInputTokens, ok := applyKiroContextUsageFallback(&totalUsage, upstreamContextPercentage, hasPreciseTokenUsage); ok {
+	if calculatedInputTokens, ok := applyKiroContextUsageFallback(&totalUsage, upstreamContextPercentage, hasPreciseTokenUsage, model); ok {
 		log.Debugf("kiro: using contextUsagePercentage (%.2f%%) to calculate input tokens: %d (local estimate was: %d)",
 			upstreamContextPercentage, calculatedInputTokens, localEstimate)
 	}
