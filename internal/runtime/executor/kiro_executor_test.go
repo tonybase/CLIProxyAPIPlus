@@ -590,7 +590,7 @@ func TestKiroContextUsageFallbackDoesNotOverwritePreciseTokenUsage(t *testing.T)
 	if !hasPreciseTokenUsage {
 		t.Fatal("applyKiroTokenUsage() = false, want true")
 	}
-	if _, applied := applyKiroContextUsageFallback(&detail, 50, hasPreciseTokenUsage); applied {
+	if _, applied := applyKiroContextUsageFallback(&detail, 50, hasPreciseTokenUsage, "kiro-claude-opus-5"); applied {
 		t.Fatal("applyKiroContextUsageFallback() applied despite precise token usage")
 	}
 	if detail.InputTokens != 290 {
@@ -603,11 +603,11 @@ func TestKiroContextUsageFallbackDoesNotOverwritePreciseTokenUsage(t *testing.T)
 
 func TestKiroContextUsageFallbackAppliesWhenPreciseTokenUsageMissing(t *testing.T) {
 	detail := usage.Detail{OutputTokens: 3}
-	calculated, applied := applyKiroContextUsageFallback(&detail, 50, false)
+	calculated, applied := applyKiroContextUsageFallback(&detail, 50, false, "kiro-claude-opus-5")
 	if !applied {
 		t.Fatal("applyKiroContextUsageFallback() applied = false, want true")
 	}
-	wantInput := int64(50 * registry.DefaultKiroContextLength / 100)
+	wantInput := int64(50 * registry.KiroContextLengthForModel("kiro-claude-opus-5") / 100)
 	if calculated != wantInput {
 		t.Fatalf("calculated input tokens = %d, want %d", calculated, wantInput)
 	}
