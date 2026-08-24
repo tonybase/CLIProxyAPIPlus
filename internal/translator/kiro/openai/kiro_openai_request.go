@@ -194,6 +194,10 @@ func BuildKiroPayloadFromOpenAI(openaiBody []byte, modelID, profileArn, origin s
 	// Check for thinking mode
 	// Supports OpenAI reasoning_effort parameter, model name hints, and Anthropic-Beta header
 	thinkingEnabled := checkThinkingModeFromOpenAIWithHeaders(openaiBody, headers)
+	var thinkingBudget int64
+	if thinkingEnabled {
+		thinkingBudget = kiroclaude.ThinkingBudgetForBody(openaiBody)
+	}
 
 	// Convert OpenAI tools to Kiro format
 	kiroTools := convertOpenAIToolsToKiro(tools)
@@ -206,16 +210,16 @@ func BuildKiroPayloadFromOpenAI(openaiBody []byte, modelID, profileArn, origin s
 	// Kiro API supports official thinking/reasoning mode via <thinking_mode> tag.
 	// When set to "enabled", Kiro returns reasoning content as official reasoningContentEvent
 	// rather than inline <thinking> tags in assistantResponseEvent.
-	// Use a conservative thinking budget to reduce latency/cost spikes in long sessions.
+	// max_thinking_length is derived from reasoning_effort so that different levels
+	// actually request different depths, then clamped to the range Kiro accepts.
 	if thinkingEnabled {
-		thinkingHint := `<thinking_mode>enabled</thinking_mode>
-<max_thinking_length>16000</max_thinking_length>`
+		thinkingHint := kiroclaude.BuildThinkingHint(thinkingBudget)
 		if systemPrompt != "" {
 			systemPrompt = thinkingHint + "\n\n" + systemPrompt
 		} else {
 			systemPrompt = thinkingHint
 		}
-		log.Infof("kiro-openai: injected thinking prompt (official mode), has_tools: %v", len(kiroTools) > 0)
+		log.Infof("kiro-openai: injected thinking prompt (official mode), max_thinking_length: %d, has_tools: %v", thinkingBudget, len(kiroTools) > 0)
 	}
 
 	// Process messages and build history
