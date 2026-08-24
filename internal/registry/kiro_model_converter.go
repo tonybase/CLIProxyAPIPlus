@@ -49,7 +49,7 @@ var DefaultKiroThinkingSupport = &ThinkingSupport{
 // absorb the tokens Kiro counts but we cannot see (injected system prompt, tool
 // schemas re-serialized upstream, per-message framing) and to leave room for the
 // completion, which shares the same window.
-const DefaultKiroContextLength = 900000
+const DefaultKiroContextLength = 800000
 
 // kiroContextLengths maps normalized Kiro model IDs to their context window.
 // Keys carry no "kiro-" prefix and no "-agentic" suffix; see
@@ -67,12 +67,12 @@ var kiroContextLengths = map[string]int{
 	"gpt-5-6-terra": 272000,
 
 	// Measured ~693K, calibrated against the tokenizer's known undercount.
-	"claude-opus-5":     922000,
-	"claude-opus-4-6":   922000,
-	"claude-opus-4-7":   922000,
-	"claude-opus-4-8":   922000,
-	"claude-sonnet-4-5": 922000,
-	"claude-sonnet-4-6": 922000,
+	"claude-opus-5":     800000,
+	"claude-opus-4-6":   800000,
+	"claude-opus-4-7":   800000,
+	"claude-opus-4-8":   800000,
+	"claude-sonnet-4-5": 800000,
+	"claude-sonnet-4-6": 800000,
 
 	// Claude 4.x models share the 200K family window: claude-haiku-4-5 measured
 	// ~155K (matching that window), and the remainder follow the same family.

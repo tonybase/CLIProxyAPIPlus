@@ -16,7 +16,7 @@ func TestKiroContextLengthForModel(t *testing.T) {
 		{
 			name:    "opus 5 keeps the large window",
 			modelID: "kiro-claude-opus-5",
-			want:    900000,
+			want:    800000,
 		},
 		{
 			name:    "claude 4.x family uses the 200k window",
@@ -26,17 +26,17 @@ func TestKiroContextLengthForModel(t *testing.T) {
 		{
 			name:    "prefix is optional",
 			modelID: "claude-opus-5",
-			want:    900000,
+			want:    800000,
 		},
 		{
 			name:    "dots normalize to hyphens",
 			modelID: "claude-opus-4.8",
-			want:    200000,
+			want:    800000,
 		},
 		{
 			name:    "agentic variants resolve to the base model",
 			modelID: "kiro-claude-opus-5-agentic",
-			want:    900000,
+			want:    800000,
 		},
 		{
 			name:    "suffixed variants fall back to the longest prefix match",
@@ -44,9 +44,11 @@ func TestKiroContextLengthForModel(t *testing.T) {
 			want:    200000,
 		},
 		{
+			// claude-sonnet-4 (200K) and claude-sonnet-4-6 (800K) both prefix
+			// this ID, so a shortest-match lookup would report the wrong window.
 			name:    "longest prefix wins over a shorter one",
-			modelID: "kiro-claude-opus-4-8-20260101",
-			want:    200000,
+			modelID: "kiro-claude-sonnet-4-6-20260101",
+			want:    800000,
 		},
 		{
 			name:    "unknown models use the default",
@@ -77,7 +79,7 @@ func TestGetKiroModelsAdvertisePerModelContextLength(t *testing.T) {
 		"kiro-gpt-5-6-luna":     272000,
 		"kiro-gpt-5-6-terra":    272000,
 		"kiro-claude-haiku-4-5": 200000,
-		"kiro-claude-opus-4-8":  200000,
+		"kiro-claude-opus-4-8":  800000,
 	}
 
 	models := GetKiroModels()
