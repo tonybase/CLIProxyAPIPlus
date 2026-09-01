@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	kirocommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/common"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
@@ -156,9 +157,9 @@ func BuildKiroPayload(claudeBody []byte, modelID, profileArn, origin string, isA
 	// Extract system prompt
 	systemPrompt := extractSystemPrompt(claudeBody)
 
-	// Check for thinking mode using the comprehensive IsThinkingEnabledWithHeaders function
+	// Check for thinking mode using the comprehensive ResolveThinkingBudget function
 	// This supports Claude API format, OpenAI reasoning_effort, AMP/Cursor format, and Anthropic-Beta header
-	thinkingEnabled := IsThinkingEnabledWithHeaders(claudeBody, headers)
+	thinkingEnabled, thinkingBudget := ResolveThinkingBudget(claudeBody, headers)
 
 	// Inject timestamp context
 	timestamp := time.Now().Format("2006-01-02 15:04:05 MST")
@@ -200,15 +201,16 @@ func BuildKiroPayload(claudeBody []byte, modelID, profileArn, origin string, isA
 	// Kiro API supports official thinking/reasoning mode via <thinking_mode> tag.
 	// When set to "enabled", Kiro returns reasoning content as official reasoningContentEvent
 	// rather than inline <thinking> tags in assistantResponseEvent.
-	// We cap max_thinking_length to reserve space for tool outputs and prevent truncation.
+	// max_thinking_length is derived from the upstream effort so that different
+	// reasoning levels actually request different depths, then clamped to the range
+	// Kiro accepts.
 	// NOTE: the hint is prepended to the user content directly, independent of the
 	// system prompt inject switch — reasoning configuration must not be silently
 	// dropped when system prompt injection is disabled.
 	thinkingHint := ""
 	if thinkingEnabled {
-		thinkingHint = `<thinking_mode>enabled</thinking_mode>
-<max_thinking_length>16000</max_thinking_length>`
-		log.Infof("kiro: thinking mode enabled (official mode), has_tools: %v", len(kiroTools) > 0)
+		thinkingHint = BuildThinkingHint(thinkingBudget)
+		log.Infof("kiro: thinking mode enabled (official mode), max_thinking_length: %d, has_tools: %v", thinkingBudget, len(kiroTools) > 0)
 	}
 
 	// Process messages and build history
@@ -377,30 +379,95 @@ func extractSystemPrompt(claudeBody []byte) string {
 	return util.FilterAgentSystemLines(systemField.String())
 }
 
-// checkThinkingMode checks if thinking mode is enabled in the Claude request
-func checkThinkingMode(claudeBody []byte) (bool, int64) {
-	thinkingEnabled := false
-	var budgetTokens int64 = 24000
+// Kiro reasoning budget bounds, mirroring registry.DefaultKiroThinkingSupport.
+// defaultThinkingLength applies when thinking is enabled without any budget
+// information (e.g. the Anthropic-Beta header path); it reserves space for tool
+// outputs to prevent truncation.
+const (
+	minThinkingLength     = 1024
+	maxThinkingLength     = 32000
+	defaultThinkingLength = 16000
+)
 
-	thinkingField := gjson.GetBytes(claudeBody, "thinking")
-	if thinkingField.Exists() {
-		thinkingType := thinkingField.Get("type").String()
-		if thinkingType == "enabled" {
-			thinkingEnabled = true
-			if bt := thinkingField.Get("budget_tokens"); bt.Exists() {
-				budgetTokens = bt.Int()
-				if budgetTokens <= 0 {
-					thinkingEnabled = false
-					log.Debugf("kiro: thinking mode disabled via budget_tokens <= 0")
-				}
-			}
-			if thinkingEnabled {
-				log.Debugf("kiro: thinking mode enabled via Claude API parameter, budget_tokens: %d", budgetTokens)
-			}
+// clampThinkingLength constrains a reasoning budget to the range Kiro accepts.
+func clampThinkingLength(budget int64) int64 {
+	if budget < minThinkingLength {
+		return minThinkingLength
+	}
+	if budget > maxThinkingLength {
+		return maxThinkingLength
+	}
+	return budget
+}
+
+// ThinkingBudgetForBody resolves the max_thinking_length to advertise to Kiro
+// for a request already known to have thinking enabled.
+//
+// Kiro expresses reasoning depth as a single <max_thinking_length> hint rather
+// than discrete effort levels, so upstream effort — Claude thinking.budget_tokens
+// or OpenAI reasoning_effort — is mapped onto that budget and clamped. Without
+// this mapping the hint would be a constant and every effort level would request
+// identical reasoning depth.
+func ThinkingBudgetForBody(body []byte) int64 {
+	// Claude API format carries an explicit token budget.
+	// An enabled request without budget_tokens (effort "auto") leaves the depth
+	// open, so it falls through to the default rather than to a stale value.
+	if enabled, budget, hasBudget := checkThinkingMode(body); enabled && hasBudget {
+		return clampThinkingLength(budget)
+	}
+
+	// OpenAI format carries a discrete effort level.
+	effort := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String()))
+	if effort != "" {
+		if budget, ok := thinking.ConvertLevelToBudget(effort); ok && budget > 0 {
+			return clampThinkingLength(int64(budget))
 		}
 	}
 
-	return thinkingEnabled, budgetTokens
+	// Thinking was enabled without a budget (e.g. the Anthropic-Beta header path).
+	return defaultThinkingLength
+}
+
+// ResolveThinkingBudget reports whether thinking mode is enabled and, when it is,
+// the max_thinking_length to advertise to Kiro.
+func ResolveThinkingBudget(body []byte, headers http.Header) (bool, int64) {
+	if !IsThinkingEnabledWithHeaders(body, headers) {
+		return false, 0
+	}
+	return true, ThinkingBudgetForBody(body)
+}
+
+// BuildThinkingHint renders the Kiro reasoning hint for a resolved budget.
+func BuildThinkingHint(budget int64) string {
+	return fmt.Sprintf("<thinking_mode>enabled</thinking_mode>\n<max_thinking_length>%d</max_thinking_length>", budget)
+}
+
+// checkThinkingMode checks if thinking mode is enabled in the Claude request.
+//
+// hasBudget distinguishes an explicit thinking.budget_tokens from its absence:
+// "type":"enabled" without a budget means the caller asked for reasoning but left
+// the depth open (this is what effort "auto" converts to), so callers must fall
+// back to their own default rather than treating budgetTokens as authoritative.
+func checkThinkingMode(claudeBody []byte) (enabled bool, budgetTokens int64, hasBudget bool) {
+	thinkingField := gjson.GetBytes(claudeBody, "thinking")
+	if !thinkingField.Exists() || thinkingField.Get("type").String() != "enabled" {
+		return false, 0, false
+	}
+
+	bt := thinkingField.Get("budget_tokens")
+	if !bt.Exists() {
+		log.Debugf("kiro: thinking mode enabled via Claude API parameter, no explicit budget_tokens")
+		return true, 0, false
+	}
+
+	budgetTokens = bt.Int()
+	if budgetTokens <= 0 {
+		log.Debugf("kiro: thinking mode disabled via budget_tokens <= 0")
+		return false, 0, true
+	}
+
+	log.Debugf("kiro: thinking mode enabled via Claude API parameter, budget_tokens: %d", budgetTokens)
+	return true, budgetTokens, true
 }
 
 // hasThinkingTagInBody checks if the request body already contains thinking configuration tags.
@@ -454,7 +521,7 @@ func IsThinkingEnabledWithHeaders(body []byte, headers http.Header) bool {
 	}
 
 	// Check Claude API format first (thinking.type = "enabled")
-	enabled, _ := checkThinkingMode(body)
+	enabled, _, _ := checkThinkingMode(body)
 	if enabled {
 		log.Debugf("kiro: IsThinkingEnabled returning true (Claude API format)")
 		return true
