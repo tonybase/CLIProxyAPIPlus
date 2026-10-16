@@ -18,6 +18,10 @@ func TestOAuthWebImportAcceptsRawKiroIDETokenJSON(t *testing.T) {
 
 	authDir := t.TempDir()
 	handler := NewOAuthWebHandler(&config.Config{AuthDir: authDir})
+	var callbackPath string
+	handler.SetTokenCallback(func(_ *KiroTokenData, authFilePath string) {
+		callbackPath = authFilePath
+	})
 	router := gin.New()
 	handler.RegisterRoutes(router)
 
@@ -53,6 +57,9 @@ func TestOAuthWebImportAcceptsRawKiroIDETokenJSON(t *testing.T) {
 	}
 	if body["fileName"] != "kiro-idc-user-example-com.json" {
 		t.Fatalf("fileName = %v", body["fileName"])
+	}
+	if want := filepath.Join(authDir, "kiro-idc-user-example-com.json"); callbackPath != want {
+		t.Fatalf("callback path = %q, want %q", callbackPath, want)
 	}
 
 	written, err := os.ReadFile(filepath.Join(authDir, "kiro-idc-user-example-com.json"))
@@ -197,7 +204,7 @@ func TestOAuthWebImportReportsSaveFailure(t *testing.T) {
 	}
 	handler := NewOAuthWebHandler(&config.Config{AuthDir: authDirFile})
 	callbackCalled := false
-	handler.SetTokenCallback(func(*KiroTokenData) {
+	handler.SetTokenCallback(func(*KiroTokenData, string) {
 		callbackCalled = true
 	})
 	router := gin.New()

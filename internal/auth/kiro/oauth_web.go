@@ -63,7 +63,7 @@ type OAuthWebHandler struct {
 	cfg             *config.Config
 	sessions        map[string]*webAuthSession
 	mu              sync.RWMutex
-	onTokenObtained func(*KiroTokenData)
+	onTokenObtained func(tokenData *KiroTokenData, authFilePath string)
 }
 
 func NewOAuthWebHandler(cfg *config.Config) *OAuthWebHandler {
@@ -73,7 +73,10 @@ func NewOAuthWebHandler(cfg *config.Config) *OAuthWebHandler {
 	}
 }
 
-func (h *OAuthWebHandler) SetTokenCallback(callback func(*KiroTokenData)) {
+// SetTokenCallback registers a callback invoked after a token has been written
+// to authFilePath, so the caller can register the credential without waiting
+// for the auth directory watcher.
+func (h *OAuthWebHandler) SetTokenCallback(callback func(tokenData *KiroTokenData, authFilePath string)) {
 	h.onTokenObtained = callback
 }
 
@@ -396,7 +399,8 @@ func (h *OAuthWebHandler) pollForToken(ctx context.Context, session *webAuthSess
 				StartURL:     session.startURL,
 			}
 
-			if _, errSave := h.saveTokenToFile(tokenData); errSave != nil {
+			authFilePath, errSave := h.saveTokenToFile(tokenData)
+			if errSave != nil {
 				log.Errorf("OAuth Web: failed to save token to file: %v", errSave)
 				h.mu.Lock()
 				session.status = statusFailed
@@ -414,7 +418,7 @@ func (h *OAuthWebHandler) pollForToken(ctx context.Context, session *webAuthSess
 			h.mu.Unlock()
 
 			if h.onTokenObtained != nil {
-				h.onTokenObtained(tokenData)
+				h.onTokenObtained(tokenData, authFilePath)
 			}
 
 			log.Infof("OAuth Web: authentication successful for %s", email)
@@ -423,7 +427,7 @@ func (h *OAuthWebHandler) pollForToken(ctx context.Context, session *webAuthSess
 	}
 }
 
-// saveTokenToFile saves the token data to the auth directory.
+// saveTokenToFile saves the token data to the auth directory and returns the written file path.
 func (h *OAuthWebHandler) saveTokenToFile(tokenData *KiroTokenData) (string, error) {
 	// Get auth directory from config or use default
 	authDir := ""
@@ -486,7 +490,7 @@ func (h *OAuthWebHandler) saveTokenToFile(tokenData *KiroTokenData) (string, err
 	}
 
 	log.Infof("OAuth Web: token saved to %s", authFilePath)
-	return fileName, nil
+	return authFilePath, nil
 }
 
 func (h *OAuthWebHandler) ssoClient(session *webAuthSession) *SSOOIDCClient {
@@ -606,7 +610,8 @@ func (h *OAuthWebHandler) handleSocialCallback(c *gin.Context) {
 		Region:       "us-east-1",
 	}
 
-	if _, errSave := h.saveTokenToFile(tokenData); errSave != nil {
+	authFilePath, errSave := h.saveTokenToFile(tokenData)
+	if errSave != nil {
 		log.Errorf("OAuth Web: failed to save social token: %v", errSave)
 		h.mu.Lock()
 		session.status = statusFailed
@@ -629,7 +634,7 @@ func (h *OAuthWebHandler) handleSocialCallback(c *gin.Context) {
 	}
 
 	if h.onTokenObtained != nil {
-		h.onTokenObtained(tokenData)
+		h.onTokenObtained(tokenData, authFilePath)
 	}
 
 	log.Infof("OAuth Web: social authentication successful for %s via %s", email, provider)
@@ -795,7 +800,7 @@ func (h *OAuthWebHandler) handleImportToken(c *gin.Context) {
 	}
 	if parsed.rawKiroIDEJSON {
 		tokenData := parsed.tokenData
-		fileName, errSave := h.saveTokenToFile(tokenData)
+		authFilePath, errSave := h.saveTokenToFile(tokenData)
 		if errSave != nil {
 			log.Errorf("OAuth Web: failed to save imported token: %v", errSave)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -805,14 +810,14 @@ func (h *OAuthWebHandler) handleImportToken(c *gin.Context) {
 			return
 		}
 		if h.onTokenObtained != nil {
-			h.onTokenObtained(tokenData)
+			h.onTokenObtained(tokenData, authFilePath)
 		}
 
 		log.Infof("OAuth Web: raw Kiro IDE token imported successfully")
 		c.JSON(http.StatusOK, gin.H{
 			"success":  true,
 			"message":  "Token imported successfully",
-			"fileName": fileName,
+			"fileName": filepath.Base(authFilePath),
 		})
 		return
 	}
@@ -857,7 +862,7 @@ func (h *OAuthWebHandler) handleImportToken(c *gin.Context) {
 	tokenData.Provider = "imported"
 
 	// Save token to file
-	fileName, errSave := h.saveTokenToFile(tokenData)
+	authFilePath, errSave := h.saveTokenToFile(tokenData)
 	if errSave != nil {
 		log.Errorf("OAuth Web: failed to save imported token: %v", errSave)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -867,14 +872,14 @@ func (h *OAuthWebHandler) handleImportToken(c *gin.Context) {
 		return
 	}
 	if h.onTokenObtained != nil {
-		h.onTokenObtained(tokenData)
+		h.onTokenObtained(tokenData, authFilePath)
 	}
 
 	log.Infof("OAuth Web: token imported successfully")
 	c.JSON(http.StatusOK, gin.H{
 		"success":  true,
 		"message":  "Token imported successfully",
-		"fileName": fileName,
+		"fileName": filepath.Base(authFilePath),
 	})
 }
 
@@ -984,7 +989,7 @@ func (h *OAuthWebHandler) handleManualRefresh(c *gin.Context) {
 
 		// Notify callback if set
 		if h.onTokenObtained != nil {
-			h.onTokenObtained(tokenData)
+			h.onTokenObtained(tokenData, filePath)
 		}
 	}
 

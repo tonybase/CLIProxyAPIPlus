@@ -1217,6 +1217,25 @@ func (h *Handler) authIDForPath(path string) string {
 	return id
 }
 
+// RegisterAuthFile registers an auth file written outside the token store
+// (e.g. the Kiro OAuth web flow) so it is listed without waiting for the
+// auth directory watcher.
+func (h *Handler) RegisterAuthFile(ctx context.Context, path string) error {
+	if h == nil {
+		return nil
+	}
+	auth, err := h.buildAuthFromFileData(path, nil)
+	if err != nil {
+		return err
+	}
+	if h.postAuthPersistHook != nil {
+		// Same path as the other OAuth flows: updates the manager and registers models.
+		return h.notifyAuthFilePersisted(ctx, auth)
+	}
+	// The file on disk is already the source of truth, so do not persist it again.
+	return h.upsertAuthRecord(coreauth.WithSkipPersist(ctx), auth)
+}
+
 func (h *Handler) registerAuthFromFile(ctx context.Context, path string, data []byte) error {
 	if h.authManager == nil {
 		return nil
