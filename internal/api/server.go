@@ -419,6 +419,11 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 
 	// === CLIProxyAPIPlus 扩展: 注册 Kiro OAuth Web 路由 ===
 	kiroOAuthHandler := kiro.NewOAuthWebHandler(cfg)
+	kiroOAuthHandler.SetTokenCallback(func(_ *kiro.KiroTokenData, authFilePath string) {
+		if errRegister := s.mgmt.RegisterAuthFile(context.Background(), authFilePath); errRegister != nil {
+			log.Errorf("Kiro OAuth Web: failed to register auth file %s: %v", filepath.Base(authFilePath), errRegister)
+		}
+	})
 	kiroOAuthHandler.RegisterRoutes(engine)
 	log.Info("Kiro OAuth Web routes registered at /v0/oauth/kiro/*")
 
