@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authstatus"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"golang.org/x/sync/semaphore"
 )
@@ -23,11 +24,19 @@ type Token struct {
 	Provider     string
 	StartURL     string
 	Region       string
+	// LoginRequired is set when the auth file carries a login-required marker.
+	LoginRequired bool
 }
 
 type TokenRepository interface {
 	FindOldestUnverified(limit int) []*Token
 	UpdateToken(token *Token) error
+}
+
+// loginRequiredMarker is implemented by repositories that can record a rejected
+// refresh credential in the token's auth file.
+type loginRequiredMarker interface {
+	MarkLoginRequired(token *Token, reason string) error
 }
 
 type RefresherOption func(*BackgroundRefresher)
@@ -59,8 +68,8 @@ type BackgroundRefresher struct {
 	wg               sync.WaitGroup
 	oauth            *KiroOAuth
 	ssoClient        *SSOOIDCClient
-	callbackMu       sync.RWMutex                                   // 保护回调函数的并发访问
-	onTokenRefreshed func(tokenID string, tokenData *KiroTokenData) // 刷新成功回调
+	callbackMu       sync.RWMutex                                   // Guards onTokenRefreshed
+	onTokenRefreshed func(tokenID string, tokenData *KiroTokenData) // Called after a successful refresh
 }
 
 func NewBackgroundRefresher(repo TokenRepository, opts ...RefresherOption) *BackgroundRefresher {
@@ -198,6 +207,13 @@ func (r *BackgroundRefresher) refreshSingle(ctx context.Context, token *Token) {
 
 	if result.Error != nil {
 		log.Printf("failed to refresh token %s: %v", token.ID, result.Error)
+		if authstatus.IsKiroLoginRequiredMessage(result.Error.Error()) {
+			if marker, ok := r.tokenRepo.(loginRequiredMarker); ok {
+				if errMark := marker.MarkLoginRequired(token, result.Error.Error()); errMark != nil {
+					log.Printf("failed to record login-required state for token %s: %v", token.ID, errMark)
+				}
+			}
+		}
 		return
 	}
 
@@ -227,13 +243,13 @@ func (r *BackgroundRefresher) refreshSingle(ctx context.Context, token *Token) {
 		return
 	}
 
-	// 方案 A: 刷新成功后触发回调，通知 Watcher 更新内存中的 Auth 对象
+	// Notify the callback so the in-memory Auth picks up the refreshed token.
 	r.callbackMu.RLock()
 	callback := r.onTokenRefreshed
 	r.callbackMu.RUnlock()
 
 	if callback != nil {
-		// 使用 defer recover 隔离回调 panic，防止崩溃整个进程
+		// Recover from callback panics so they cannot crash the process.
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	kiroauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 )
@@ -113,6 +114,10 @@ func (w *Watcher) pollAuthDirOnce() {
 		if !strings.HasSuffix(strings.ToLower(name), ".json") {
 			continue
 		}
+		// Skip files owned by another auth-shard node before reading them over NFS.
+		if !authshard.Owns(name) {
+			continue
+		}
 		fullPath := filepath.Join(authDir, name)
 		seen[w.normalizeAuthPath(fullPath)] = struct{}{}
 		w.addOrUpdateClientLocked(fullPath)
@@ -179,7 +184,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	normalizedAuthDir := w.normalizeAuthPath(w.authDir)
 	isConfigEvent := normalizedName == normalizedConfigPath && event.Op&configOps != 0
 	authOps := fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename
-	isAuthJSON := filepath.Dir(normalizedName) == normalizedAuthDir && strings.HasSuffix(normalizedName, ".json") && event.Op&authOps != 0
+	isAuthJSON := filepath.Dir(normalizedName) == normalizedAuthDir && strings.HasSuffix(normalizedName, ".json") && event.Op&authOps != 0 && authshard.Owns(normalizedName)
 	isKiroIDEToken := w.isKiroIDETokenFile(event.Name) && event.Op&authOps != 0
 	if !isConfigEvent && !isAuthJSON && !isKiroIDEToken {
 		// Ignore unrelated files (e.g., cookie snapshots *.cookie) and other noise.

@@ -45,6 +45,12 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 func ParseConfigBytes(data []byte) (*Config, error) { return internalconfig.ParseConfigBytes(data) }
 
+// PortEnv names the environment variable that overrides the configured server port.
+const PortEnv = internalconfig.PortEnv
+
+// PortFromEnv returns the server port set through PORT, or 0 when it is unset.
+func PortFromEnv() (int, error) { return internalconfig.PortFromEnv() }
+
 func SaveConfigPreserveComments(configFile string, cfg *Config) error {
 	return internalconfig.SaveConfigPreserveComments(configFile, cfg)
 }

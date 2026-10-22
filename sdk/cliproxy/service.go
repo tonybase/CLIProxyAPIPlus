@@ -14,6 +14,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
 	kiroauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/homeplugins"
@@ -823,6 +824,35 @@ func (s *Service) applyRetryConfig(cfg *config.Config) {
 	maxInterval := time.Duration(cfg.MaxRetryInterval) * time.Second
 	s.coreManager.SetRetryConfig(cfg.RequestRetry, maxInterval, cfg.MaxRetryCredentials)
 	coreauth.SetTransientErrorCooldownSeconds(cfg.TransientErrorCooldownSeconds)
+}
+
+// managerCooldownSyncInterval is how often an auth-shard manager re-reads the cooldown
+// state files written by the workers.
+const managerCooldownSyncInterval = 30 * time.Second
+
+// syncManagerCooldownStates mirrors the cooldown state files written by auth-shard
+// workers on a manager node. A manager executes no requests, so those files are its
+// only source of runtime status; without this it would keep the startup snapshot.
+// The role is checked on every tick so a hot-reloaded layout takes effect.
+func (s *Service) syncManagerCooldownStates(ctx context.Context) {
+	if s == nil || s.coreManager == nil {
+		return
+	}
+	ticker := time.NewTicker(managerCooldownSyncInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !authshard.IsManager() {
+				continue
+			}
+			if errSync := s.coreManager.SyncCooldownStatesFromStore(ctx); errSync != nil {
+				log.Warnf("failed to sync cooldown state written by auth-shard workers: %v", errSync)
+			}
+		}
+	}
 }
 
 func (s *Service) configureCooldownStateStore(cfg *config.Config) {
@@ -1717,6 +1747,16 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}
 
+	// Configure auth sharding before the store is loaded so embedded services shard too.
+	if _, errPort := config.PortFromEnv(); errPort != nil {
+		return fmt.Errorf("cliproxy: %w", errPort)
+	}
+	if s.cfg != nil {
+		if _, errShard := authshard.Configure(s.cfg.AuthShard); errShard != nil {
+			return fmt.Errorf("cliproxy: invalid auth-shard config: %w", errShard)
+		}
+	}
+
 	s.applyRetryConfig(s.cfg)
 	applyKiroRuntimeConfig(s.cfg)
 	s.configureCooldownStateStore(s.cfg)
@@ -1812,7 +1852,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	time.Sleep(100 * time.Millisecond)
-	fmt.Printf("API server started successfully on: %s:%d\n", s.cfg.Host, s.cfg.Port)
+	fmt.Printf("API server started successfully on: %s:%d\n", s.cfg.Host, s.cfg.ListenPort())
 
 	s.applyPprofConfig(s.cfg)
 
@@ -1852,6 +1892,7 @@ func (s *Service) Run(ctx context.Context) error {
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(context.Background(), interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
+		go s.syncManagerCooldownStates(ctx)
 	}
 
 	select {

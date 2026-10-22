@@ -15,6 +15,7 @@ import (
 	"time"
 
 	qoderauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/qoder"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -209,6 +210,10 @@ func (s *FileTokenStore) resolveDeletePath(id string) (string, error) {
 }
 
 func (s *FileTokenStore) readAuthFiles(path, baseDir string) ([]*cliproxyauth.Auth, error) {
+	// Skip files owned by another node when auth-dir is sharded.
+	if !authshard.Owns(path) {
+		return nil, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
