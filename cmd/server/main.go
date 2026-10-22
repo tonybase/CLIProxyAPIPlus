@@ -691,13 +691,12 @@ func main() {
 	} else {
 		cfg.AuthDir = resolvedAuthDir
 	}
-	if _, errShard := authshard.Configure(cfg.AuthShard.NodeCount, cfg.AuthShard.NodeIndex); errShard != nil {
+	if _, errShard := authshard.Configure(cfg.AuthShard); errShard != nil {
 		log.Errorf("invalid auth-shard config: %v", errShard)
 		return
 	}
 	if authshard.Enabled() {
-		count, index := authshard.Layout()
-		log.Infof("auth-shard enabled: node %d of %d", index, count)
+		log.Infof("auth-shard enabled: %s", authshard.Describe())
 	}
 	managementasset.SetCurrentConfig(cfg)
 

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -356,30 +355,16 @@ type PprofConfig struct {
 }
 
 // AuthShardConfig splits a shared auth-dir across nodes by hashing auth file names.
+// AUTH_SHARD_* environment variables override these values at runtime (see internal/authshard).
 type AuthShardConfig struct {
-	// NodeCount is the total number of nodes sharing auth-dir. <= 1 disables sharding.
+	// Enabled turns sharding on. When false every node loads and refreshes every auth file.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// NodeCount is the number of worker nodes sharing auth-dir.
 	NodeCount int `yaml:"node-count" json:"node-count"`
-	// NodeIndex is this node's zero-based index in [0, NodeCount).
+	// NodeIndex is this worker's zero-based index in [0, NodeCount).
 	NodeIndex int `yaml:"node-index" json:"node-index"`
-}
-
-// applyAuthShardEnv lets AUTH_SHARD_COUNT / AUTH_SHARD_INDEX override the YAML values,
-// so nodes sharing one config file can still get distinct indexes.
-func (c *Config) applyAuthShardEnv() {
-	if raw := strings.TrimSpace(os.Getenv("AUTH_SHARD_COUNT")); raw != "" {
-		if v, errAtoi := strconv.Atoi(raw); errAtoi == nil {
-			c.AuthShard.NodeCount = v
-		} else {
-			log.WithField("value", raw).Warn("invalid AUTH_SHARD_COUNT; ignoring")
-		}
-	}
-	if raw := strings.TrimSpace(os.Getenv("AUTH_SHARD_INDEX")); raw != "" {
-		if v, errAtoi := strconv.Atoi(raw); errAtoi == nil {
-			c.AuthShard.NodeIndex = v
-		} else {
-			log.WithField("value", raw).Warn("invalid AUTH_SHARD_INDEX; ignoring")
-		}
-	}
+	// Role is "worker" (default) or "manager". A manager loads every auth file but never refreshes credentials.
+	Role string `yaml:"role" json:"role"`
 }
 
 // RemoteManagement holds management API configuration under 'remote-management'.
@@ -986,8 +971,6 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.MaxRetryCredentials < 0 {
 		cfg.MaxRetryCredentials = 0
 	}
-
-	cfg.applyAuthShardEnv()
 
 	cfg.NormalizePluginsConfig()
 	if errResolvePluginsDir := cfg.ResolvePluginsDir(); errResolvePluginsDir != nil && cfg.Plugins.Enabled {

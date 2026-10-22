@@ -14,6 +14,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
 	kiroauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/homeplugins"
@@ -1714,6 +1715,13 @@ func (s *Service) Run(ctx context.Context) error {
 	if !homeEnabled {
 		if errEnsureAuthDir := s.ensureAuthDir(); errEnsureAuthDir != nil {
 			return errEnsureAuthDir
+		}
+	}
+
+	// Configure auth sharding before the store is loaded so embedded services shard too.
+	if s.cfg != nil {
+		if _, errShard := authshard.Configure(s.cfg.AuthShard); errShard != nil {
+			return fmt.Errorf("cliproxy: invalid auth-shard config: %w", errShard)
 		}
 	}
 

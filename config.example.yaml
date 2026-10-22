@@ -35,10 +35,20 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: '~/.cli-proxy-api'
 
-# Split a shared auth-dir (e.g. NFS) across nodes. Each node loads only the auth
-# files whose name hashes to its index. node-count <= 1 disables sharding.
-# AUTH_SHARD_COUNT / AUTH_SHARD_INDEX env vars override these values.
+# Split a shared auth-dir (e.g. NFS) across nodes.
+# - role "worker" (default): loads and refreshes only the auth files whose name
+#   hashes to node-index out of node-count workers.
+# - role "manager": loads every auth file so the management panel can list and
+#   re-login all accounts, but never refreshes credentials. Keep business traffic
+#   off manager nodes; node-count / node-index are ignored for managers.
+# A worker that sees a refresh token rejected writes login_required /
+# login_required_reason / login_required_at into the auth file, so every node
+# (including the manager) reports the account as needing a new login.
+# AUTH_SHARD_ENABLED / AUTH_SHARD_COUNT / AUTH_SHARD_INDEX / AUTH_SHARD_ROLE env
+# vars override these values and are never written back to this file.
 # auth-shard:
+#   enabled: true
+#   role: worker
 #   node-count: 3
 #   node-index: 0
 

@@ -135,12 +135,11 @@ func (w *Watcher) reloadConfig() bool {
 		}
 	}
 
-	shardChanged, errShard := authshard.Configure(newConfig.AuthShard.NodeCount, newConfig.AuthShard.NodeIndex)
+	shardChanged, errShard := authshard.Configure(newConfig.AuthShard)
 	if errShard != nil {
 		log.Errorf("invalid auth-shard config on reload, keeping previous layout: %v", errShard)
 	} else if shardChanged {
-		count, index := authshard.Layout()
-		log.Infof("auth-shard layout changed: node %d of %d", index, count)
+		log.Infof("auth-shard layout changed: %s", authshard.Describe())
 	}
 
 	authDirChanged := oldConfig == nil || oldConfig.AuthDir != newConfig.AuthDir || shardChanged

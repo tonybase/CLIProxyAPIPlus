@@ -13,30 +13,32 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authstatus"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 )
 
-// FileTokenRepository 实现 TokenRepository 接口，基于文件系统存储
+// FileTokenRepository implements TokenRepository on top of the auth directory.
 type FileTokenRepository struct {
 	mu      sync.RWMutex
 	baseDir string
 }
 
-// NewFileTokenRepository 创建一个新的文件 token 存储库
+// NewFileTokenRepository creates a file-backed token repository.
 func NewFileTokenRepository(baseDir string) *FileTokenRepository {
 	return &FileTokenRepository{
 		baseDir: baseDir,
 	}
 }
 
-// SetBaseDir 设置基础目录
+// SetBaseDir sets the auth directory.
 func (r *FileTokenRepository) SetBaseDir(dir string) {
 	r.mu.Lock()
 	r.baseDir = strings.TrimSpace(dir)
 	r.mu.Unlock()
 }
 
-// FindOldestUnverified 查找需要刷新的 token（按最后验证时间排序）
+// FindOldestUnverified returns tokens that need a refresh, least recently verified first.
 func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 	r.mu.RLock()
 	baseDir := r.baseDir
@@ -60,8 +62,8 @@ func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 			return nil
 		}
 
-		// Only handle kiro token files owned by this node.
-		if !strings.HasPrefix(d.Name(), "kiro-") || !authshard.Owns(d.Name()) {
+		// Only refresh kiro token files this node is responsible for.
+		if !strings.HasPrefix(d.Name(), "kiro-") || !authshard.Refreshes(d.Name()) {
 			return nil
 		}
 
@@ -71,8 +73,9 @@ func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 			return nil
 		}
 
-		if token != nil && token.RefreshToken != "" {
-			// 检查 token 是否需要刷新（过期前 5 分钟）
+		// A rejected refresh token only recovers through a new login, so stop retrying it.
+		if token != nil && token.RefreshToken != "" && !token.LoginRequired {
+			// Refresh tokens that expire within 5 minutes.
 			if token.ExpiresAt.IsZero() || time.Until(token.ExpiresAt) < 5*time.Minute {
 				tokens = append(tokens, token)
 			}
@@ -85,12 +88,11 @@ func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 		log.Warnf("token repository: error walking directory: %v", err)
 	}
 
-	// 按最后验证时间排序（最旧的优先）
+	// Oldest verification first.
 	sort.Slice(tokens, func(i, j int) bool {
 		return tokens[i].LastVerified.Before(tokens[j].LastVerified)
 	})
 
-	// 限制返回数量
 	if limit > 0 && len(tokens) > limit {
 		tokens = tokens[:limit]
 	}
@@ -98,33 +100,17 @@ func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 	return tokens
 }
 
-// UpdateToken 更新 token 并持久化到文件
+// UpdateToken persists a refreshed token to its auth file.
 func (r *FileTokenRepository) UpdateToken(token *Token) error {
 	if token == nil {
 		return fmt.Errorf("token repository: token is nil")
 	}
 
-	r.mu.RLock()
-	baseDir := r.baseDir
-	r.mu.RUnlock()
-
-	if baseDir == "" {
-		return fmt.Errorf("token repository: base directory not configured")
+	filePath, existingData, err := r.loadTokenFile(token.ID)
+	if err != nil {
+		return err
 	}
 
-	// 构建文件路径
-	filePath := filepath.Join(baseDir, token.ID)
-	if !strings.HasSuffix(filePath, ".json") {
-		filePath += ".json"
-	}
-
-	// 读取现有文件内容
-	existingData := make(map[string]any)
-	if data, err := os.ReadFile(filePath); err == nil {
-		_ = json.Unmarshal(data, &existingData)
-	}
-
-	// 更新字段
 	existingData["access_token"] = token.AccessToken
 	existingData["refresh_token"] = token.RefreshToken
 	existingData["last_refresh"] = time.Now().Format(time.RFC3339)
@@ -133,7 +119,7 @@ func (r *FileTokenRepository) UpdateToken(token *Token) error {
 		existingData["expires_at"] = token.ExpiresAt.Format(time.RFC3339)
 	}
 
-	// 保持原有的关键字段
+	// Keep the fields required for future refreshes.
 	if token.ClientID != "" {
 		existingData["client_id"] = token.ClientID
 	}
@@ -150,27 +136,72 @@ func (r *FileTokenRepository) UpdateToken(token *Token) error {
 		existingData["start_url"] = token.StartURL
 	}
 
-	// 序列化并写入文件
-	raw, err := json.MarshalIndent(existingData, "", "  ")
-	if err != nil {
-		return fmt.Errorf("token repository: marshal failed: %w", err)
-	}
+	// A successful refresh proves the account is still signed in.
+	authstatus.ClearLoginRequired(existingData)
 
-	// 原子写入：先写入临时文件，再重命名
-	tmpPath := filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, raw, 0o600); err != nil {
-		return fmt.Errorf("token repository: write temp file failed: %w", err)
+	if err := writeTokenFile(filePath, existingData); err != nil {
+		return err
 	}
-	if err := os.Rename(tmpPath, filePath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("token repository: rename failed: %w", err)
-	}
-
 	log.Debugf("token repository: updated token %s", token.ID)
 	return nil
 }
 
-// readTokenFile 从文件读取 token
+// MarkLoginRequired records in the token's auth file that its refresh credential was
+// rejected, so every node sharing the auth directory can see the account needs a new login.
+func (r *FileTokenRepository) MarkLoginRequired(token *Token, reason string) error {
+	if token == nil {
+		return fmt.Errorf("token repository: token is nil")
+	}
+	filePath, existingData, err := r.loadTokenFile(token.ID)
+	if err != nil {
+		return err
+	}
+	if !authstatus.MarkLoginRequired(existingData, reason, time.Now()) {
+		return nil
+	}
+	if err := writeTokenFile(filePath, existingData); err != nil {
+		return err
+	}
+	token.LoginRequired = true
+	log.Warnf("token repository: token %s needs a new login: %s", token.ID, reason)
+	return nil
+}
+
+// loadTokenFile resolves the auth file for id and returns its current contents.
+func (r *FileTokenRepository) loadTokenFile(id string) (string, map[string]any, error) {
+	r.mu.RLock()
+	baseDir := r.baseDir
+	r.mu.RUnlock()
+
+	if baseDir == "" {
+		return "", nil, fmt.Errorf("token repository: base directory not configured")
+	}
+
+	filePath := filepath.Join(baseDir, id)
+	if !strings.HasSuffix(filePath, ".json") {
+		filePath += ".json"
+	}
+
+	existingData := make(map[string]any)
+	if data, err := os.ReadFile(filePath); err == nil {
+		_ = json.Unmarshal(data, &existingData)
+	}
+	return filePath, existingData, nil
+}
+
+// writeTokenFile atomically replaces the auth file, so peers on a shared directory never read a torn file.
+func writeTokenFile(filePath string, data map[string]any) error {
+	raw, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("token repository: marshal failed: %w", err)
+	}
+	if err := util.WriteJSONFileAtomic(filePath, raw, 0o600); err != nil {
+		return fmt.Errorf("token repository: write failed: %w", err)
+	}
+	return nil
+}
+
+// readTokenFile reads a token from an auth file.
 func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -182,17 +213,17 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 		return nil, err
 	}
 
-	// 检查是否是 kiro token
+	// Only kiro tokens.
 	tokenType, _ := metadata["type"].(string)
 	if tokenType != "kiro" {
 		return nil, nil
 	}
 
-	// 检查 auth_method (case-insensitive comparison to handle "IdC", "IDC", "idc", etc.)
+	// Check auth_method (case-insensitive comparison to handle "IdC", "IDC", "idc", etc.)
 	authMethod, _ := metadata["auth_method"].(string)
 	authMethod = strings.ToLower(authMethod)
 	if authMethod != "idc" && authMethod != "builder-id" {
-		return nil, nil // 只处理 IDC 和 Builder ID token
+		return nil, nil // Only IDC and Builder ID tokens are refreshed here
 	}
 
 	token := &Token{
@@ -200,7 +231,6 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 		AuthMethod: authMethod,
 	}
 
-	// 解析各字段
 	token.AccessToken, _ = metadata["access_token"].(string)
 	token.RefreshToken, _ = metadata["refresh_token"].(string)
 	token.ClientID, _ = metadata["client_id"].(string)
@@ -208,8 +238,8 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 	token.Region, _ = metadata["region"].(string)
 	token.StartURL, _ = metadata["start_url"].(string)
 	token.Provider, _ = metadata["provider"].(string)
+	token.LoginRequired, _, _ = authstatus.LoginRequired(metadata)
 
-	// 解析时间字段
 	if expiresAtStr, ok := metadata["expires_at"].(string); ok && expiresAtStr != "" {
 		if t, err := time.Parse(time.RFC3339, expiresAtStr); err == nil {
 			token.ExpiresAt = t
@@ -224,7 +254,7 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 	return token, nil
 }
 
-// ListKiroTokens 列出所有 Kiro token（用于调试）
+// ListKiroTokens lists the Kiro tokens loaded by this node (for debugging).
 func (r *FileTokenRepository) ListKiroTokens(ctx context.Context) ([]*Token, error) {
 	r.mu.RLock()
 	baseDir := r.baseDir

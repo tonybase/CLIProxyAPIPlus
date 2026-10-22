@@ -39,6 +39,7 @@ import (
 	qoderauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/qoder"
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authstatus"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
@@ -559,6 +560,14 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	}
 	if !auth.NextRetryAfter.IsZero() {
 		entry["next_retry_after"] = auth.NextRetryAfter
+	}
+	// Persisted by the refreshing node, so every node sharing the auth-dir reports it.
+	if required, reason, at := authstatus.LoginRequired(auth.Metadata); required {
+		entry["login_required"] = true
+		entry["login_required_reason"] = reason
+		if at != "" {
+			entry["login_required_at"] = at
+		}
 	}
 	if path != "" {
 		entry["path"] = path

@@ -2,40 +2,105 @@ package authshard
 
 import (
 	"fmt"
+	"math"
 	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
 func resetShard(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() { _, _ = Configure(0, 0) })
+	t.Cleanup(func() { _, _ = Configure(config.AuthShardConfig{}) })
+}
+
+func worker(count, index int) config.AuthShardConfig {
+	return config.AuthShardConfig{Enabled: true, NodeCount: count, NodeIndex: index}
 }
 
 func TestOwnsDisabled(t *testing.T) {
 	resetShard(t)
-	for _, count := range []int{0, 1} {
-		if _, err := Configure(count, 0); err != nil {
-			t.Fatalf("Configure(%d,0): %v", count, err)
+	for _, cfg := range []config.AuthShardConfig{{}, {NodeCount: 3, NodeIndex: 1}, worker(1, 0)} {
+		if _, err := Configure(cfg); err != nil {
+			t.Fatalf("Configure(%+v): %v", cfg, err)
 		}
-		if !Owns("kiro-social-a@b.com.json") {
-			t.Fatalf("count=%d should own every file", count)
+		if Enabled() || !Owns("kiro-social-a@b.com.json") || !Refreshes("kiro-social-a@b.com.json") {
+			t.Fatalf("cfg %+v should own and refresh every file", cfg)
 		}
 	}
 }
 
 func TestConfigureValidation(t *testing.T) {
 	resetShard(t)
-	for _, tc := range []struct{ count, index int }{{3, 3}, {3, -1}, {2, 5}} {
-		if _, err := Configure(tc.count, tc.index); err == nil {
-			t.Fatalf("Configure(%d,%d) should fail", tc.count, tc.index)
+	invalid := []config.AuthShardConfig{
+		worker(3, 3),
+		worker(3, -1),
+		worker(0, 0),
+		worker(math.MaxInt32+1, 0),
+		{Enabled: true, NodeCount: 2, Role: "observer"},
+	}
+	for _, cfg := range invalid {
+		if _, err := Configure(cfg); err == nil {
+			t.Fatalf("Configure(%+v) should fail", cfg)
 		}
 	}
-	changed, err := Configure(3, 1)
+	changed, err := Configure(worker(3, 1))
 	if err != nil || !changed {
 		t.Fatalf("Configure(3,1) changed=%v err=%v", changed, err)
 	}
-	changed, err = Configure(3, 1)
+	changed, err = Configure(worker(3, 1))
 	if err != nil || changed {
 		t.Fatalf("repeat Configure(3,1) changed=%v err=%v", changed, err)
+	}
+	if _, err = Configure(worker(3, 9)); err == nil {
+		t.Fatal("Configure(3,9) should fail")
+	}
+	if count, index := Layout(); count != 3 || index != 1 {
+		t.Fatalf("invalid config replaced layout: got %d/%d, want 3/1", index, count)
+	}
+}
+
+func TestManagerOwnsAllRefreshesNone(t *testing.T) {
+	resetShard(t)
+	if _, err := Configure(config.AuthShardConfig{Enabled: true, Role: "Manager"}); err != nil {
+		t.Fatal(err)
+	}
+	if !Enabled() || !IsManager() {
+		t.Fatal("manager role should be enabled")
+	}
+	for i := range 20 {
+		name := fmt.Sprintf("kiro-social-user%d.json", i)
+		if !Owns(name) {
+			t.Fatalf("manager should own %s", name)
+		}
+		if Refreshes(name) {
+			t.Fatalf("manager should not refresh %s", name)
+		}
+	}
+}
+
+func TestResolveEnvOverrides(t *testing.T) {
+	resetShard(t)
+	t.Setenv("AUTH_SHARD_ENABLED", "true")
+	t.Setenv("AUTH_SHARD_COUNT", "4")
+	t.Setenv("AUTH_SHARD_INDEX", " 2 ")
+	t.Setenv("AUTH_SHARD_ROLE", "worker")
+	cfg := config.AuthShardConfig{NodeCount: 3}
+	if _, err := Configure(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if count, index := Layout(); count != 4 || index != 2 {
+		t.Fatalf("layout = %d/%d, want 2/4", index, count)
+	}
+	if cfg.NodeCount != 3 || cfg.Enabled {
+		t.Fatalf("Configure mutated the config value: %+v", cfg)
+	}
+}
+
+func TestResolveInvalidEnvFails(t *testing.T) {
+	resetShard(t)
+	t.Setenv("AUTH_SHARD_INDEX", "node-2")
+	if _, err := Configure(worker(3, 0)); err == nil {
+		t.Fatal("invalid AUTH_SHARD_INDEX should fail")
 	}
 }
 
@@ -48,8 +113,11 @@ func TestOwnershipPartitionsFiles(t *testing.T) {
 		name := fmt.Sprintf("kiro-social-user%d@example.com.json", i)
 		hits := 0
 		for idx := range count {
-			if _, err := Configure(count, idx); err != nil {
+			if _, err := Configure(worker(count, idx)); err != nil {
 				t.Fatal(err)
+			}
+			if Owns(name) != Refreshes(name) {
+				t.Fatalf("worker Owns and Refreshes disagree for %s", name)
 			}
 			if Owns(name) {
 				hits++

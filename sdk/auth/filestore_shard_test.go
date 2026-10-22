@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
 func TestFileTokenStoreList_AuthShardPartitions(t *testing.T) {
-	t.Cleanup(func() { _, _ = authshard.Configure(0, 0) })
+	t.Cleanup(func() { _, _ = authshard.Configure(config.AuthShardConfig{}) })
 
 	dir := t.TempDir()
 	const total = 20
@@ -28,7 +29,7 @@ func TestFileTokenStoreList_AuthShardPartitions(t *testing.T) {
 
 	seen := make(map[string]int)
 	for index := range 2 {
-		if _, errConfigure := authshard.Configure(2, index); errConfigure != nil {
+		if _, errConfigure := authshard.Configure(config.AuthShardConfig{Enabled: true, NodeCount: 2, NodeIndex: index}); errConfigure != nil {
 			t.Fatal(errConfigure)
 		}
 		auths, errList := store.List(context.Background())
