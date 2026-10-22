@@ -207,7 +207,7 @@ func (r *BackgroundRefresher) refreshSingle(ctx context.Context, token *Token) {
 
 	if result.Error != nil {
 		log.Printf("failed to refresh token %s: %v", token.ID, result.Error)
-		if authstatus.IsLoginRequiredMessage(result.Error.Error()) {
+		if authstatus.IsKiroLoginRequiredMessage(result.Error.Error()) {
 			if marker, ok := r.tokenRepo.(loginRequiredMarker); ok {
 				if errMark := marker.MarkLoginRequired(token, result.Error.Error()); errMark != nil {
 					log.Printf("failed to record login-required state for token %s: %v", token.ID, errMark)

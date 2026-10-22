@@ -8,13 +8,19 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/authstatus"
 )
 
-// IsLoginRequiredError reports whether a refresh error means the stored refresh
-// credential was rejected, so only a new login can recover the account.
-func IsLoginRequiredError(err error) bool {
+// IsLoginRequiredError reports whether a refresh error from provider means the stored
+// refresh credential was rejected, so only a new login can recover the account.
+func IsLoginRequiredError(provider string, err error) bool {
 	if err == nil {
 		return false
 	}
-	return isUnauthorizedError(err) || authstatus.IsLoginRequiredMessage(err.Error())
+	if isUnauthorizedError(err) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(provider), "kiro") {
+		return authstatus.IsKiroLoginRequiredMessage(err.Error())
+	}
+	return authstatus.IsLoginRequiredMessage(err.Error())
 }
 
 // ApplyLoginRequiredFromMetadata marks auth as unauthorized when its metadata carries a

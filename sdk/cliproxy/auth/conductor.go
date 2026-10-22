@@ -6069,7 +6069,7 @@ func (m *Manager) refreshAuthForRequest(ctx context.Context, id, failedAccessTok
 	now := time.Now()
 	if err != nil {
 		unauthorized := isUnauthorizedError(err)
-		loginRequired := IsLoginRequiredError(err)
+		loginRequired := IsLoginRequiredError(auth.Provider, err)
 		shouldReschedule := false
 		var markerToPersist *Auth
 		m.mu.Lock()

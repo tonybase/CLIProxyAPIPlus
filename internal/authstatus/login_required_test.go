@@ -10,13 +10,31 @@ func TestIsLoginRequiredMessage(t *testing.T) {
 	cases := map[string]bool{
 		"token refresh failed (status 400): {\"error\":\"invalid_grant\"}": true,
 		"token refresh failed (status 400): invalid_client":                true,
+		"token refresh failed (status 400): {\"error\":\"expired_token\"}": true,
 		"refresh failed: status 401":                                       true,
-		"token refresh failed (status 500): upstream unavailable":          false,
-		"refresh request failed: dial tcp: i/o timeout":                    false,
+		// invalid_request means malformed input for most providers.
+		"token refresh failed (status 400): {\"error\":\"invalid_request\"}": false,
+		"token refresh failed (status 500): upstream unavailable":            false,
+		"refresh request failed: dial tcp: i/o timeout":                      false,
 	}
 	for msg, want := range cases {
 		if got := IsLoginRequiredMessage(msg); got != want {
 			t.Errorf("IsLoginRequiredMessage(%q) = %v, want %v", msg, got, want)
+		}
+	}
+}
+
+func TestIsKiroLoginRequiredMessage(t *testing.T) {
+	cases := map[string]bool{
+		// Kiro IDC refresh of an unusable token, as logged by the background refresher.
+		"token refresh failed and existing token is expired: token refresh failed (status 400): {\"error\":\"invalid_request\",\"error_description\":\"Invalid request\",\"location\":null,\"reason\":null}": true,
+		"token refresh failed (status 400): {\"error\":\"invalid_grant\"}":      true,
+		"token refresh failed (status 500): {\"error\":\"invalid_request\"}":    false,
+		"Post \"https://oidc.us-east-1.amazonaws.com/token\": context canceled": false,
+	}
+	for msg, want := range cases {
+		if got := IsKiroLoginRequiredMessage(msg); got != want {
+			t.Errorf("IsKiroLoginRequiredMessage(%q) = %v, want %v", msg, got, want)
 		}
 	}
 }

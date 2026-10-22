@@ -23,11 +23,24 @@ const maxReasonRunes = 300
 func IsLoginRequiredMessage(msg string) bool {
 	raw := strings.ToLower(msg)
 	// OAuth/OIDC token endpoints answer a revoked refresh token or an expired client
-	// registration with HTTP 400 and invalid_grant / invalid_client.
+	// registration with HTTP 400 and invalid_grant / invalid_client / expired_token.
 	return strings.Contains(raw, "status 401") ||
 		strings.Contains(raw, "401 unauthorized") ||
 		strings.Contains(raw, "invalid_grant") ||
-		strings.Contains(raw, "invalid_client")
+		strings.Contains(raw, "invalid_client") ||
+		strings.Contains(raw, "expired_token")
+}
+
+// IsKiroLoginRequiredMessage extends IsLoginRequiredMessage with the Kiro-specific
+// rejection: AWS SSO OIDC (Kiro IDC) answers a refresh token that is no longer usable
+// with HTTP 400 invalid_request, while the same request succeeds for healthy accounts.
+// It is kept separate because other providers use invalid_request for malformed input.
+func IsKiroLoginRequiredMessage(msg string) bool {
+	if IsLoginRequiredMessage(msg) {
+		return true
+	}
+	raw := strings.ToLower(msg)
+	return strings.Contains(raw, "status 400") && strings.Contains(raw, "invalid_request")
 }
 
 // MarkLoginRequired records the login-required marker in metadata. It reports whether
