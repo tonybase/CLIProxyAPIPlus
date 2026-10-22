@@ -665,6 +665,16 @@ func (m *Manager) restoreCooldownRecordLocked(record CooldownStateRecord, now ti
 	}
 	state.LastError = cloneError(record.LastError)
 	updateAggregatedAvailability(auth, now)
+	// Surface the failure at auth level as MarkResult does, so views that only read
+	// auth-level fields (the management auth list) show why the auth is unavailable.
+	auth.Status = StatusError
+	auth.UpdatedAt = updatedAt
+	if reason != "" {
+		auth.StatusMessage = reason
+	}
+	if record.LastError != nil {
+		auth.LastError = cloneError(record.LastError)
+	}
 	return true
 }
 
