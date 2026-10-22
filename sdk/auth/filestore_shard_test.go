@@ -1,0 +1,53 @@
+package auth
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
+)
+
+func TestFileTokenStoreList_AuthShardPartitions(t *testing.T) {
+	t.Cleanup(func() { _, _ = authshard.Configure(0, 0) })
+
+	dir := t.TempDir()
+	const total = 20
+	for i := range total {
+		name := fmt.Sprintf("kiro-social-user%d.json", i)
+		data := fmt.Sprintf(`{"type":"kiro","email":"user%d@example.com"}`, i)
+		if errWrite := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); errWrite != nil {
+			t.Fatal(errWrite)
+		}
+	}
+
+	store := NewFileTokenStore()
+	store.SetBaseDir(dir)
+
+	seen := make(map[string]int)
+	for index := range 2 {
+		if _, errConfigure := authshard.Configure(2, index); errConfigure != nil {
+			t.Fatal(errConfigure)
+		}
+		auths, errList := store.List(context.Background())
+		if errList != nil {
+			t.Fatal(errList)
+		}
+		if len(auths) == 0 || len(auths) == total {
+			t.Fatalf("node %d listed %d auths, want a strict subset of %d", index, len(auths), total)
+		}
+		for _, auth := range auths {
+			seen[auth.ID]++
+		}
+	}
+	if len(seen) != total {
+		t.Fatalf("union of shards = %d auths, want %d", len(seen), total)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Fatalf("%s listed by %d nodes, want exactly 1", id, n)
+		}
+	}
+}

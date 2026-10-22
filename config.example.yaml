@@ -35,6 +35,13 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: '~/.cli-proxy-api'
 
+# Split a shared auth-dir (e.g. NFS) across nodes. Each node loads only the auth
+# files whose name hashes to its index. node-count <= 1 disables sharding.
+# AUTH_SHARD_COUNT / AUTH_SHARD_INDEX env vars override these values.
+# auth-shard:
+#   node-count: 3
+#   node-index: 0
+
 # API keys for authentication
 api-keys:
   - 'your-api-key-1'

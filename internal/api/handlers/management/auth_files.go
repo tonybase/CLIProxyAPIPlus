@@ -38,6 +38,7 @@ import (
 	kiroauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
 	qoderauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/qoder"
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
@@ -896,6 +897,10 @@ func (h *Handler) DeleteAuthFile(c *gin.Context) {
 			if !strings.HasSuffix(strings.ToLower(name), ".json") {
 				continue
 			}
+			// Only delete files owned by this node; the auth-dir may be shared.
+			if !authshard.Owns(name) {
+				continue
+			}
 			full := filepath.Join(h.cfg.AuthDir, name)
 			if !filepath.IsAbs(full) {
 				if abs, errAbs := filepath.Abs(full); errAbs == nil {
@@ -1027,6 +1032,12 @@ func (h *Handler) writeAuthFile(ctx context.Context, name string, data []byte) e
 	}
 	if errWrite := os.WriteFile(dst, persistData, 0o600); errWrite != nil {
 		return fmt.Errorf("failed to write file: %w", errWrite)
+	}
+	if !authshard.Owns(dst) {
+		// Another node owns this file and will pick it up from the shared auth-dir.
+		count, _ := authshard.Layout()
+		log.WithField("file", filepath.Base(dst)).Infof("auth file belongs to auth-shard node %d; not registering on this node", authshard.OwnerOf(dst, count))
+		return nil
 	}
 	if err := h.upsertAuthRecord(ctx, auth); err != nil {
 		return err
@@ -1221,7 +1232,7 @@ func (h *Handler) authIDForPath(path string) string {
 // (e.g. the Kiro OAuth web flow) so it is listed without waiting for the
 // auth directory watcher.
 func (h *Handler) RegisterAuthFile(ctx context.Context, path string) error {
-	if h == nil {
+	if h == nil || !authshard.Owns(path) {
 		return nil
 	}
 	auth, err := h.buildAuthFromFileData(path, nil)
@@ -2130,6 +2141,10 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 	savedPath, errSave := store.Save(ctx, record)
 	if errSave != nil {
 		return savedPath, errSave
+	}
+	if savedPath != "" && !authshard.Owns(savedPath) {
+		// Another node owns this file and will pick it up from the shared auth-dir.
+		return savedPath, nil
 	}
 	if h.postAuthPersistHook != nil {
 		if errHook := h.postAuthPersistHook(ctx, record); errHook != nil {

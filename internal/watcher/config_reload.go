@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/diff"
@@ -134,7 +135,15 @@ func (w *Watcher) reloadConfig() bool {
 		}
 	}
 
-	authDirChanged := oldConfig == nil || oldConfig.AuthDir != newConfig.AuthDir
+	shardChanged, errShard := authshard.Configure(newConfig.AuthShard.NodeCount, newConfig.AuthShard.NodeIndex)
+	if errShard != nil {
+		log.Errorf("invalid auth-shard config on reload, keeping previous layout: %v", errShard)
+	} else if shardChanged {
+		count, index := authshard.Layout()
+		log.Infof("auth-shard layout changed: node %d of %d", index, count)
+	}
+
+	authDirChanged := oldConfig == nil || oldConfig.AuthDir != newConfig.AuthDir || shardChanged
 	retryConfigChanged := oldConfig != nil && (oldConfig.RequestRetry != newConfig.RequestRetry || oldConfig.MaxRetryInterval != newConfig.MaxRetryInterval || oldConfig.MaxRetryCredentials != newConfig.MaxRetryCredentials)
 	forceAuthRefresh := oldConfig != nil && (oldConfig.ForceModelPrefix != newConfig.ForceModelPrefix || !reflect.DeepEqual(oldConfig.OAuthModelAlias, newConfig.OAuthModelAlias) || retryConfigChanged)
 

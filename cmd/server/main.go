@@ -20,6 +20,7 @@ import (
 	configaccess "github.com/router-for-me/CLIProxyAPI/v7/internal/access/config_access"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/cmd"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -689,6 +690,14 @@ func main() {
 		return
 	} else {
 		cfg.AuthDir = resolvedAuthDir
+	}
+	if _, errShard := authshard.Configure(cfg.AuthShard.NodeCount, cfg.AuthShard.NodeIndex); errShard != nil {
+		log.Errorf("invalid auth-shard config: %v", errShard)
+		return
+	}
+	if authshard.Enabled() {
+		count, index := authshard.Layout()
+		log.Infof("auth-shard enabled: node %d of %d", index, count)
 	}
 	managementasset.SetCurrentConfig(cfg)
 

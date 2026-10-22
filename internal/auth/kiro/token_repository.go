@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -50,7 +51,7 @@ func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 
 	err := filepath.WalkDir(baseDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil // 忽略错误，继续遍历
+			return nil // Ignore errors and keep walking
 		}
 		if d.IsDir() {
 			return nil
@@ -59,8 +60,8 @@ func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 			return nil
 		}
 
-		// 只处理 kiro 相关的 token 文件
-		if !strings.HasPrefix(d.Name(), "kiro-") {
+		// Only handle kiro token files owned by this node.
+		if !strings.HasPrefix(d.Name(), "kiro-") || !authshard.Owns(d.Name()) {
 			return nil
 		}
 
@@ -242,7 +243,7 @@ func (r *FileTokenRepository) ListKiroTokens(ctx context.Context) ([]*Token, err
 		if d.IsDir() {
 			return nil
 		}
-		if !strings.HasPrefix(d.Name(), "kiro-") || !strings.HasSuffix(d.Name(), ".json") {
+		if !strings.HasPrefix(d.Name(), "kiro-") || !strings.HasSuffix(d.Name(), ".json") || !authshard.Owns(d.Name()) {
 			return nil
 		}
 

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -49,6 +50,9 @@ type Config struct {
 
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
+
+	// AuthShard splits a shared auth-dir across nodes; each node loads only its hash shard.
+	AuthShard AuthShardConfig `yaml:"auth-shard" json:"-"`
 
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
@@ -349,6 +353,33 @@ type PprofConfig struct {
 	Enable bool `yaml:"enable" json:"enable"`
 	// Addr is the host:port address for the pprof HTTP server.
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+// AuthShardConfig splits a shared auth-dir across nodes by hashing auth file names.
+type AuthShardConfig struct {
+	// NodeCount is the total number of nodes sharing auth-dir. <= 1 disables sharding.
+	NodeCount int `yaml:"node-count" json:"node-count"`
+	// NodeIndex is this node's zero-based index in [0, NodeCount).
+	NodeIndex int `yaml:"node-index" json:"node-index"`
+}
+
+// applyAuthShardEnv lets AUTH_SHARD_COUNT / AUTH_SHARD_INDEX override the YAML values,
+// so nodes sharing one config file can still get distinct indexes.
+func (c *Config) applyAuthShardEnv() {
+	if raw := strings.TrimSpace(os.Getenv("AUTH_SHARD_COUNT")); raw != "" {
+		if v, errAtoi := strconv.Atoi(raw); errAtoi == nil {
+			c.AuthShard.NodeCount = v
+		} else {
+			log.WithField("value", raw).Warn("invalid AUTH_SHARD_COUNT; ignoring")
+		}
+	}
+	if raw := strings.TrimSpace(os.Getenv("AUTH_SHARD_INDEX")); raw != "" {
+		if v, errAtoi := strconv.Atoi(raw); errAtoi == nil {
+			c.AuthShard.NodeIndex = v
+		} else {
+			log.WithField("value", raw).Warn("invalid AUTH_SHARD_INDEX; ignoring")
+		}
+	}
 }
 
 // RemoteManagement holds management API configuration under 'remote-management'.
@@ -955,6 +986,8 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.MaxRetryCredentials < 0 {
 		cfg.MaxRetryCredentials = 0
 	}
+
+	cfg.applyAuthShardEnv()
 
 	cfg.NormalizePluginsConfig()
 	if errResolvePluginsDir := cfg.ResolvePluginsDir(); errResolvePluginsDir != nil && cfg.Plugins.Enabled {
