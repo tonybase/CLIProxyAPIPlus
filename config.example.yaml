@@ -2,7 +2,8 @@
 # Use "127.0.0.1" or "localhost" to restrict access to local machine only.
 host: ''
 
-# Server port
+# Server port. The PORT environment variable overrides it at runtime and is never
+# written back to this file, so nodes sharing one config can listen on different ports.
 port: 8317
 
 # TLS settings for HTTPS. When enabled, the server listens with the provided certificate and key.

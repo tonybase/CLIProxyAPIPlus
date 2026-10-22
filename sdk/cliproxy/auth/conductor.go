@@ -2219,8 +2219,15 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 			auth.ModelStates = existing.ModelStates
 		}
 	}
-	ApplyLoginRequiredFromMetadata(auth)
 	now := time.Now()
+	// A new login or a successful refresh replaces the credential, so failures caused by
+	// the old one no longer apply. Quota cooldowns belong to the account and are kept.
+	var resumedModels []string
+	clearedCredentialFailure := false
+	if credentialReplaced(existing, auth) {
+		resumedModels, clearedCredentialFailure = clearCredentialFailureState(auth, now)
+	}
+	ApplyLoginRequiredFromMetadata(auth)
 	clearedCooldown := false
 	if m.cooldownDisabledForAuth(auth) || auth.Disabled || auth.Status == StatusDisabled {
 		clearedCooldown = clearCooldownStateForAuth(auth, now)
@@ -2229,6 +2236,9 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	authClone := auth.Clone()
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
+	for _, model := range resumedModels {
+		registry.GetGlobalRegistry().ResumeClientModel(auth.ID, model)
+	}
 	if !shouldDeferAPIKeyModelAliasRebuild(ctx) {
 		m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	}
@@ -2238,7 +2248,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.queueRefreshReschedule(auth.ID)
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
-	if clearedCooldown {
+	if clearedCooldown || clearedCredentialFailure {
 		m.persistCooldownStates(ctx)
 	}
 	return auth.Clone(), nil

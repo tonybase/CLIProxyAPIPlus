@@ -691,6 +691,10 @@ func main() {
 	} else {
 		cfg.AuthDir = resolvedAuthDir
 	}
+	if _, errPort := config.PortFromEnv(); errPort != nil {
+		log.Errorf("invalid server port override: %v", errPort)
+		return
+	}
 	if _, errShard := authshard.Configure(cfg.AuthShard); errShard != nil {
 		log.Errorf("invalid auth-shard config: %v", errShard)
 		return
@@ -927,7 +931,7 @@ func main() {
 
 				cancel, done := cmd.StartServiceBackgroundWithPluginHost(cfg, configFilePath, password, pluginHost, serverOptions...)
 
-				client := tui.NewClient(cfg.Port, password)
+				client := tui.NewClient(cfg.ListenPort(), password)
 				ready := false
 				backoff := 100 * time.Millisecond
 				for i := 0; i < 30; i++ {
@@ -949,7 +953,7 @@ func main() {
 					return
 				}
 
-				if errRun := tui.Run(cfg.Port, password, hook, origStdout); errRun != nil {
+				if errRun := tui.Run(cfg.ListenPort(), password, hook, origStdout); errRun != nil {
 					restoreIO()
 					fmt.Fprintf(os.Stderr, "TUI error: %v\n", errRun)
 				} else {
@@ -961,7 +965,7 @@ func main() {
 			} else {
 				// Default TUI mode: pure management client.
 				// The proxy server must already be running.
-				if errRun := tui.Run(cfg.Port, password, nil, os.Stdout); errRun != nil {
+				if errRun := tui.Run(cfg.ListenPort(), password, nil, os.Stdout); errRun != nil {
 					fmt.Fprintf(os.Stderr, "TUI error: %v\n", errRun)
 				}
 			}

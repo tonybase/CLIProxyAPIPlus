@@ -275,7 +275,7 @@ func stopForwarderInstance(port int, forwarder *callbackForwarder) {
 }
 
 func (h *Handler) managementCallbackURL(path string) (string, error) {
-	if h == nil || h.cfg == nil || h.cfg.Port <= 0 {
+	if h == nil || h.cfg == nil || h.cfg.ListenPort() <= 0 {
 		return "", fmt.Errorf("server port is not configured")
 	}
 	if !strings.HasPrefix(path, "/") {
@@ -285,7 +285,7 @@ func (h *Handler) managementCallbackURL(path string) (string, error) {
 	if h.cfg.TLS.Enable {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://127.0.0.1:%d%s", scheme, h.cfg.Port, path), nil
+	return fmt.Sprintf("%s://127.0.0.1:%d%s", scheme, h.cfg.ListenPort(), path), nil
 }
 
 func pluginAuthProviderFromPath(path string) (string, bool) {

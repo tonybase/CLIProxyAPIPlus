@@ -1719,6 +1719,9 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	// Configure auth sharding before the store is loaded so embedded services shard too.
+	if _, errPort := config.PortFromEnv(); errPort != nil {
+		return fmt.Errorf("cliproxy: %w", errPort)
+	}
 	if s.cfg != nil {
 		if _, errShard := authshard.Configure(s.cfg.AuthShard); errShard != nil {
 			return fmt.Errorf("cliproxy: invalid auth-shard config: %w", errShard)
@@ -1820,7 +1823,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	time.Sleep(100 * time.Millisecond)
-	fmt.Printf("API server started successfully on: %s:%d\n", s.cfg.Host, s.cfg.Port)
+	fmt.Printf("API server started successfully on: %s:%d\n", s.cfg.Host, s.cfg.ListenPort())
 
 	s.applyPprofConfig(s.cfg)
 
