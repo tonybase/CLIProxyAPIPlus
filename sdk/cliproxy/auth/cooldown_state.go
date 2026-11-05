@@ -148,6 +148,10 @@ func (s *FileCooldownStateStore) Save(ctx context.Context, records []CooldownSta
 		if authID == "" {
 			continue
 		}
+		// In a sharded auth directory only the owning worker writes an auth's cooldown state.
+		if !cooldownRecordOwned(record) {
+			continue
+		}
 		path, errPath := s.statePath(record)
 		if errPath != nil {
 			return errPath
@@ -248,6 +252,10 @@ func (s *FileCooldownStateStore) removeStaleStateFiles(ctx context.Context, desi
 			if _, ok := desired[filepath.Clean(path)]; ok {
 				return nil
 			}
+		}
+		// Peers sharing the auth directory own their auths' state files; leave those alone.
+		if !cooldownStateFileOwned(path) {
+			return nil
 		}
 		if errRemove := os.Remove(path); errRemove != nil && !errors.Is(errRemove, os.ErrNotExist) {
 			return fmt.Errorf("remove stale cooldown state %s: %w", path, errRemove)

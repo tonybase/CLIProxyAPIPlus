@@ -50,6 +50,9 @@ type Config struct {
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 
+	// AuthShard splits a shared auth-dir across nodes; each node loads only its hash shard.
+	AuthShard AuthShardConfig `yaml:"auth-shard" json:"-"`
+
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
 
@@ -349,6 +352,19 @@ type PprofConfig struct {
 	Enable bool `yaml:"enable" json:"enable"`
 	// Addr is the host:port address for the pprof HTTP server.
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+// AuthShardConfig splits a shared auth-dir across nodes by hashing auth file names.
+// AUTH_SHARD_* environment variables override these values at runtime (see internal/authshard).
+type AuthShardConfig struct {
+	// Enabled turns sharding on. When false every node loads and refreshes every auth file.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// NodeCount is the number of worker nodes sharing auth-dir.
+	NodeCount int `yaml:"node-count" json:"node-count"`
+	// NodeIndex is this worker's zero-based index in [0, NodeCount).
+	NodeIndex int `yaml:"node-index" json:"node-index"`
+	// Role is "worker" (default) or "manager". A manager loads every auth file but never refreshes credentials.
+	Role string `yaml:"role" json:"role"`
 }
 
 // RemoteManagement holds management API configuration under 'remote-management'.

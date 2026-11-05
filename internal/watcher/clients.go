@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -98,6 +99,9 @@ func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string
 					}
 					name := entry.Name()
 					if !strings.HasSuffix(strings.ToLower(name), ".json") {
+						continue
+					}
+					if !authshard.Owns(name) {
 						continue
 					}
 					fullPath := filepath.Join(resolvedAuthDir, name)

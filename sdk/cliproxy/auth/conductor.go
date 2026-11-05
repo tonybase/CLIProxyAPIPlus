@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authstatus"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
@@ -664,6 +665,16 @@ func (m *Manager) restoreCooldownRecordLocked(record CooldownStateRecord, now ti
 	}
 	state.LastError = cloneError(record.LastError)
 	updateAggregatedAvailability(auth, now)
+	// Surface the failure at auth level as MarkResult does, so views that only read
+	// auth-level fields (the management auth list) show why the auth is unavailable.
+	auth.Status = StatusError
+	auth.UpdatedAt = updatedAt
+	if reason != "" {
+		auth.StatusMessage = reason
+	}
+	if record.LastError != nil {
+		auth.LastError = cloneError(record.LastError)
+	}
 	return true
 }
 
@@ -2169,6 +2180,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	if auth.ID == "" {
 		auth.ID = uuid.NewString()
 	}
+	ApplyLoginRequiredFromMetadata(auth)
 	now := time.Now()
 	clearedCooldown := false
 	if m.cooldownDisabledForAuth(auth) || auth.Disabled || auth.Status == StatusDisabled {
@@ -2218,6 +2230,14 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		}
 	}
 	now := time.Now()
+	// A new login or a successful refresh replaces the credential, so failures caused by
+	// the old one no longer apply. Quota cooldowns belong to the account and are kept.
+	var resumedModels []string
+	clearedCredentialFailure := false
+	if credentialReplaced(existing, auth) {
+		resumedModels, clearedCredentialFailure = clearCredentialFailureState(auth, now)
+	}
+	ApplyLoginRequiredFromMetadata(auth)
 	clearedCooldown := false
 	if m.cooldownDisabledForAuth(auth) || auth.Disabled || auth.Status == StatusDisabled {
 		clearedCooldown = clearCooldownStateForAuth(auth, now)
@@ -2226,6 +2246,9 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	authClone := auth.Clone()
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
+	for _, model := range resumedModels {
+		registry.GetGlobalRegistry().ResumeClientModel(auth.ID, model)
+	}
 	if !shouldDeferAPIKeyModelAliasRebuild(ctx) {
 		m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	}
@@ -2235,7 +2258,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.queueRefreshReschedule(auth.ID)
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
-	if clearedCooldown {
+	if clearedCooldown || clearedCredentialFailure {
 		m.persistCooldownStates(ctx)
 	}
 	return auth.Clone(), nil
@@ -2320,6 +2343,11 @@ func (m *Manager) Load(ctx context.Context) error {
 		if auth == nil || auth.ID == "" {
 			continue
 		}
+		// Every store backend shares one auth set across nodes; keep only this node's shard.
+		if !loadedByThisNode(auth) {
+			continue
+		}
+		ApplyLoginRequiredFromMetadata(auth)
 		auth.EnsureIndex()
 		m.auths[auth.ID] = auth.Clone()
 	}
@@ -5699,6 +5727,9 @@ func (m *Manager) shouldRefresh(a *Auth, now time.Time) bool {
 	if a == nil {
 		return false
 	}
+	if !RefreshesOnThisNode(a) {
+		return false
+	}
 	if hasUnauthorizedAuthFailure(a) {
 		return false
 	}
@@ -6017,6 +6048,9 @@ func (m *Manager) refreshAuthForRequest(ctx context.Context, id, failedAccessTok
 	if auth == nil || exec == nil {
 		return nil, errors.New("auth or executor not found")
 	}
+	if !RefreshesOnThisNode(auth) {
+		return nil, errors.New("auth refresh is handled by the owning auth-shard node")
+	}
 
 	// Another request may already have refreshed this credential.
 	if failedAccessToken != "" {
@@ -6035,17 +6069,24 @@ func (m *Manager) refreshAuthForRequest(ctx context.Context, id, failedAccessTok
 	now := time.Now()
 	if err != nil {
 		unauthorized := isUnauthorizedError(err)
+		loginRequired := IsLoginRequiredError(auth.Provider, err)
 		shouldReschedule := false
+		var markerToPersist *Auth
 		m.mu.Lock()
 		if current := m.auths[id]; current != nil {
 			current.LastError = refreshErrorFromError(err)
-			if unauthorized {
+			if unauthorized || loginRequired {
 				current.NextRefreshAfter = time.Time{}
 				current.Unavailable = true
 				current.Status = StatusError
 				current.StatusMessage = "unauthorized"
 			} else {
 				current.NextRefreshAfter = now.Add(refreshFailureBackoff)
+			}
+			// Record the rejected credential in the auth file so every node sharing the
+			// auth directory, including a manager node, can see the account needs a new login.
+			if loginRequired && authstatus.MarkLoginRequired(current.Metadata, err.Error(), now) {
+				markerToPersist = current.Clone()
 			}
 			m.auths[id] = current
 			shouldReschedule = true
@@ -6054,6 +6095,11 @@ func (m *Manager) refreshAuthForRequest(ctx context.Context, id, failedAccessTok
 			}
 		}
 		m.mu.Unlock()
+		if markerToPersist != nil {
+			if errPersist := m.persist(ctx, markerToPersist); errPersist != nil {
+				log.Warnf("persist login-required marker for %s (%s) failed: %v", markerToPersist.Provider, markerToPersist.ID, errPersist)
+			}
+		}
 		if shouldReschedule {
 			m.queueRefreshReschedule(id)
 		}
@@ -6077,6 +6123,8 @@ func (m *Manager) refreshAuthForRequest(ctx context.Context, id, failedAccessTok
 	if updated.Status == StatusError {
 		updated.Status = StatusActive
 	}
+	// A working refresh credential proves the account is signed in; Update persists the cleared marker.
+	authstatus.ClearLoginRequired(updated.Metadata)
 	updated.UpdatedAt = now
 	modelsToResume := clearUnauthorizedModelStates(updated, now)
 	if m.shouldRefresh(updated, now) {

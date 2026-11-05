@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authshard"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
@@ -928,6 +929,11 @@ func (h *OAuthWebHandler) handleManualRefresh(c *gin.Context) {
 		}
 		name := file.Name()
 		if !strings.HasPrefix(name, "kiro-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		// Only the owning auth-shard worker rotates a refresh token; a peer refreshing it
+		// concurrently would invalidate the token the owner holds.
+		if !authshard.Refreshes(name) {
 			continue
 		}
 

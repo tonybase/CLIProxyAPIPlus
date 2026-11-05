@@ -339,7 +339,9 @@ func (c *SSOOIDCClient) RefreshTokenWithRegion(ctx context.Context, clientID, cl
 
 	if resp.StatusCode != http.StatusOK {
 		log.Warnf("IDC token refresh failed (status %d): %s", resp.StatusCode, string(respBody))
-		return nil, fmt.Errorf("token refresh failed (status %d)", resp.StatusCode)
+		// Keep the OIDC error body (e.g. invalid_grant) so callers can tell a revoked
+		// refresh token from a transient failure.
+		return nil, fmt.Errorf("token refresh failed (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var result CreateTokenResponse

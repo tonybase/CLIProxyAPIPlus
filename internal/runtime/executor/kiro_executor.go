@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 	kiroauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/authstatus"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	kiroclaude "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/claude"
@@ -3837,6 +3838,10 @@ func (e *KiroExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*c
 	if auth == nil {
 		return nil, fmt.Errorf("kiro executor: auth is nil")
 	}
+	// In a sharded auth directory only the owning worker rotates this refresh token.
+	if !cliproxyauth.RefreshesOnThisNode(auth) {
+		return nil, fmt.Errorf("kiro executor: refresh for %s is handled by its auth-shard owner", auth.ID)
+	}
 
 	// Double-check: After acquiring lock, verify token still needs refresh
 	// Another goroutine may have already refreshed while we were waiting
@@ -3946,6 +3951,8 @@ func (e *KiroExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*c
 	updated.Metadata["refresh_token"] = tokenData.RefreshToken
 	updated.Metadata["expires_at"] = tokenData.ExpiresAt
 	updated.Metadata["last_refresh"] = now.Format(time.RFC3339)
+	// A successful refresh proves the account is still signed in.
+	authstatus.ClearLoginRequired(updated.Metadata)
 	if tokenData.ProfileArn != "" {
 		updated.Metadata["profile_arn"] = tokenData.ProfileArn
 	}
