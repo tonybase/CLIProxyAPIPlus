@@ -749,6 +749,23 @@ func buildUserMessageFromOpenAI(msg gjson.Result, modelID, origin string) (KiroU
 					for _, item := range resultContent.Array() {
 						if item.Get("type").String() == "text" {
 							textContents = append(textContents, KiroTextContent{Text: item.Get("text").String()})
+						} else if item.Get("type").String() == "image" {
+							mediaType := item.Get("source.media_type").String()
+							data := item.Get("source.data").String()
+							format := strings.TrimPrefix(mediaType, "image/")
+							if item.Get("source.type").String() != "base64" ||
+								!strings.HasPrefix(mediaType, "image/") || format == "" || data == "" {
+								continue
+							}
+
+							// Kiro tool results carry text; attach images to the enclosing message.
+							images = append(images, KiroImage{
+								Format: format,
+								Source: KiroImageSource{Bytes: data},
+							})
+							textContents = append(textContents, KiroTextContent{
+								Text: fmt.Sprintf("[Image %d from this tool result is attached to the user message.]", len(images)),
+							})
 						} else if item.Type == gjson.String {
 							textContents = append(textContents, KiroTextContent{Text: item.String()})
 						}
